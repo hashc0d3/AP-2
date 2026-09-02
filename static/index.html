@@ -105,6 +105,19 @@
     .price { color: var(--price); font-size: 22px; font-weight: 700; }
     .title { font-size: 16px; line-height: 1.3; }
     .addr { color: var(--muted); font-size: 13px; }
+    .seller { color: var(--muted); font-size: 13px; }
+    .phone {
+      color: #22c55e;
+      font-size: 18px;
+      font-weight: 700;
+      text-decoration: none;
+      letter-spacing: 0.02em;
+    }
+    .card.callable {
+      border-color: #16a34a;
+      box-shadow: 0 0 0 1px #16a34a66;
+    }
+    .btn.call.muted { opacity: 0.5; }
     .actions { display: flex; gap: 8px; margin-top: auto; padding-top: 8px; }
     .btn {
       display: inline-flex;
@@ -159,14 +172,20 @@
         : `<div class="ph">нет фото</div>`;
       const callHref = ad.phone ? ("tel:" + ad.phone) : ad.url;
       const imagesAttr = encodeURIComponent(JSON.stringify(images));
-      return `<article class="card" data-id="${ad.id}">
+      const phoneHtml = ad.phone
+        ? `<a class="phone" href="tel:${escapeHtml(ad.phone)}">${escapeHtml(ad.phone)}</a>`
+        : "";
+      const sellerHtml = ad.seller ? `<div class="seller">${escapeHtml(ad.seller)}</div>` : "";
+      return `<article class="card${ad.phone ? " callable" : ""}" data-id="${ad.id}">
         <div class="gallery" data-images="${imagesAttr}">${gallery}</div>
         <div class="body">
           <div class="price">${escapeHtml(ad.price || "")}</div>
           <div class="title">${escapeHtml(ad.title || "")}</div>
           <div class="addr">${escapeHtml(ad.published ? ad.published + " · " : "")}${escapeHtml(ad.address || "")}</div>
+          ${sellerHtml}
+          ${phoneHtml}
           <div class="actions">
-            <a class="btn call" href="${callHref}" ${ad.phone ? "" : 'target="_blank" rel="noopener"'}>Позвонить</a>
+            <a class="btn call${ad.phone ? "" : " muted"}" href="${callHref}" ${ad.phone ? "" : 'target="_blank" rel="noopener"'}>Позвонить</a>
             <a class="btn open" href="${ad.url}" target="_blank" rel="noopener">Открыть</a>
           </div>
         </div>

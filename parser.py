@@ -20,6 +20,7 @@ COOKIES_PATH = STORAGE_DIR / "cookies.json"
 SEEN_PATH = STORAGE_DIR / "seen.json"
 SPFA_COOKIES_URL = "https://spfa.pro/api/cookies/mobile/"
 SPFA_UNBLOCK_URL = "https://spfa.pro/api/unblock/"
+SPFA_PHONE_URL = "https://spfa.pro/api/phone/"
 PROXY_HOSTS = ("mproxy.site", "fproxy.site", "bproxy.site", "gproxy.site")
 
 
@@ -29,14 +30,18 @@ def load_config() -> dict:
 
 
 def load_session() -> dict:
-    if not COOKIES_PATH.exists():
-        raise RuntimeError("Нет storage/cookies.json — сначала получите cookies через spfa")
-    return json.loads(COOKIES_PATH.read_text(encoding="utf-8"))
+    from cookie_pool import acquire, current
+
+    session = current() or acquire()
+    if not session:
+        raise RuntimeError("Пул cookies пуст — запустите cookie_service.py")
+    return session
 
 
 def save_session(session: dict) -> None:
-    STORAGE_DIR.mkdir(parents=True, exist_ok=True)
-    COOKIES_PATH.write_text(json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
+    from cookie_pool import save_slot
+
+    save_slot(session)
 
 
 def load_seen() -> set[int]:
@@ -148,6 +153,83 @@ def title_matches(item: dict, must_contain: list, skip: list) -> bool:
     return True
 
 
+def _norm_text(value: str) -> str:
+    return "".join(ch for ch in value.lower() if ch.isalnum())
+
+
+def _add_text(out: list[str], value) -> None:
+    if isinstance(value, str) and value.strip():
+        out.append(value.strip())
+
+
+def seller_texts(item: dict) -> list[str]:
+    found: list[str] = []
+    for key in ("sellerName", "userName", "shopName", "companyName"):
+        _add_text(found, item.get(key))
+    logo = item.get("userLogo")
+    if isinstance(logo, dict):
+        for key in ("link", "slug"):
+            _add_text(found, logo.get(key))
+    for blob in (item.get("user"), item.get("seller"), item.get("shop"), item.get("profile")):
+        if not isinstance(blob, dict):
+            continue
+        for key in ("title", "name", "text", "value", "link", "slug"):
+            _add_text(found, blob.get(key))
+        profile = blob.get("profile")
+        if isinstance(profile, dict):
+            for key in ("title", "name", "link", "slug"):
+                _add_text(found, profile.get(key))
+    iva = item.get("iva")
+    if not isinstance(iva, dict):
+        return found
+    for name, steps in iva.items():
+        name_l = str(name).lower()
+        if not any(part in name_l for part in ("user", "seller", "shop", "profile")):
+            continue
+        if not isinstance(steps, list):
+            steps = [steps]
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            payload = step.get("payload") if isinstance(step.get("payload"), dict) else step
+            for key in ("title", "name", "text", "link", "slug"):
+                _add_text(found, payload.get(key))
+            profile = payload.get("profile") or payload.get("user") or {}
+            if not isinstance(profile, dict):
+                continue
+            for key in ("title", "name", "text", "link", "slug"):
+                _add_text(found, profile.get(key))
+            badge = profile.get("badge") or profile.get("badges") or payload.get("badge")
+            if isinstance(badge, dict):
+                _add_text(found, badge.get("title") or badge.get("name"))
+            elif isinstance(badge, str):
+                _add_text(found, badge)
+            elif isinstance(badge, list):
+                for entry in badge:
+                    if isinstance(entry, dict):
+                        _add_text(found, entry.get("title") or entry.get("name"))
+                    else:
+                        _add_text(found, entry)
+    return found
+
+
+def seller_name(item: dict) -> str:
+    texts = seller_texts(item)
+    for text in texts:
+        if "://" not in text and not text.startswith("/"):
+            return text
+    return texts[0] if texts else ""
+
+
+def seller_is_skipped(item: dict, skip: list) -> bool:
+    if not skip:
+        return False
+    blob = "".join(_norm_text(text) for text in seller_texts(item))
+    if not blob:
+        return False
+    return any(_norm_text(word) in blob for word in skip if word)
+
+
 def ad_address(item: dict) -> str:
     geo = item.get("geo") or {}
     if isinstance(geo, dict):
@@ -217,7 +299,6 @@ def serialize_ad(item: dict) -> dict:
     phone = item.get("phone")
     if not isinstance(phone, str) or not phone.strip():
         phone = None
-    contacts = item.get("contacts") or {}
     published = published_at(item)
     age = age_seconds(item)
     published_text = format_age(age)
@@ -225,6 +306,7 @@ def serialize_ad(item: dict) -> dict:
         published_text = published.astimezone().strftime("%d.%m.%Y %H:%M")
     elif published:
         published_text = f"{published.astimezone().strftime('%H:%M:%S')} · {published_text}"
+    seller = seller_name(item)
     return {
         "id": item.get("id"),
         "title": item.get("title") or "без названия",
@@ -234,7 +316,8 @@ def serialize_ad(item: dict) -> dict:
         "url": ad_url(item),
         "images": images[:12],
         "phone": phone,
-        "can_call": bool(phone or contacts.get("phone")),
+        "can_call": bool(phone),
+        "seller": seller,
         "published": published_text,
         "ts": int(time.time()),
     }
@@ -249,7 +332,11 @@ def format_ad(item: dict) -> str:
     url = ad_url(item)
     age = format_age(age_seconds(item))
     age_part = f"{age}  |  " if age else ""
-    return f"{title}\n{age_part}{price}  |  {address}\n{url}"
+    seller = seller_name(item)
+    seller_part = f"  |  {seller}" if seller else ""
+    phone = item.get("phone")
+    phone_part = f"\n{phone}" if isinstance(phone, str) and phone.strip() else ""
+    return f"{title}\n{age_part}{price}  |  {address}{seller_part}{phone_part}\n{url}"
 
 
 def wifi_gateway() -> str | None:
@@ -315,49 +402,88 @@ def change_ip(change_url: str) -> None:
 
 
 def buy_cookies(api_key: str, proxy_string: str) -> dict:
-    logger.info("Покупаю новые cookies на spfa.pro...")
-    response = std_requests.post(
-        SPFA_COOKIES_URL,
-        json={"api_key": api_key, "mobile": True, "proxy": proxy_string},
-        headers={"Accept": "application/json", "Content-Type": "application/json"},
-        timeout=40,
-    )
-    if not response.ok:
-        raise RuntimeError(f"spfa.pro {response.status_code}: {response.text[:300]}")
-    payload = response.json()
-    results = payload.get("results") or {}
-    cookies = results.get("cookies")
-    fingerprint = results.get("fingerprint") or {}
-    headers = fingerprint.get("headers") if isinstance(fingerprint, dict) else {}
-    user_agent = results.get("user_agent") or (headers.get("user-agent") if isinstance(headers, dict) else None)
-    if not payload.get("success") or not cookies or not user_agent:
-        raise RuntimeError(f"Неполные cookies: {payload}")
-    session = {
-        "id": results.get("id"),
-        "cookies": cookies,
-        "user_agent": user_agent,
-        "fingerprint": fingerprint,
-        "mobile": results.get("mobile", True),
-        "saved_at": time.time(),
-    }
-    save_session(session)
-    logger.info(f"Cookies получены, id={session['id']}")
-    time.sleep(3)
-    return session
+    from cookie_pool import buy_one, load_config
+
+    return buy_one(load_config())
 
 
-def unblock_cookies(session: dict, api_key: str, proxy_string: str) -> None:
-    cookie_id = session.get("id")
-    if not cookie_id:
-        return
-    logger.info(f"Пробую разблокировать cookies id={cookie_id}")
-    std_requests.post(
-        SPFA_UNBLOCK_URL,
-        json={"id": cookie_id, "api_key": api_key, "proxy": proxy_string},
-        headers={"Accept": "application/json", "Content-Type": "application/json"},
-        timeout=30,
-    )
-    time.sleep(5)
+def _phone_from_row(row: dict) -> str | None:
+    phone = row.get("phone") or row.get("number") or row.get("tel")
+    if isinstance(phone, dict):
+        phone = phone.get("phone") or phone.get("number") or phone.get("value")
+    if isinstance(phone, int):
+        phone = str(phone)
+    if isinstance(phone, str):
+        phone = phone.strip()
+        if phone and phone.lower() not in {"null", "none", "-"}:
+            return phone
+    return None
+
+
+def fetch_phones(api_key: str, ad_ids: list) -> dict[str, str]:
+    found: dict[str, str] = {}
+    ids = [str(ad_id) for ad_id in ad_ids if ad_id]
+    if not ids or not api_key:
+        return found
+    for offset in range(0, len(ids), 50):
+        chunk = ids[offset : offset + 50]
+        logger.info(f"Запрашиваю телефоны SPFA для {len(chunk)} объявлений")
+        payload = None
+        for attempt in (1, 2):
+            try:
+                response = std_requests.post(
+                    SPFA_PHONE_URL,
+                    json={"api_key": api_key, "ads": chunk},
+                    headers={"Accept": "application/json", "Content-Type": "application/json"},
+                    timeout=90,
+                )
+            except std_requests.RequestException as err:
+                logger.warning(f"SPFA phone: сеть {err}")
+                break
+            if response.status_code == 403:
+                logger.warning("SPFA phone: 403 — метод недоступен без реального пополнения баланса")
+                return found
+            if not response.ok:
+                logger.warning(f"SPFA phone {response.status_code}: {response.text[:300]}")
+                break
+            try:
+                payload = response.json()
+            except ValueError:
+                logger.warning("SPFA phone: ответ не JSON")
+                break
+            if not payload.get("success"):
+                logger.warning(f"SPFA phone: {payload}")
+                break
+            got = 0
+            for row in payload.get("results") or []:
+                if not isinstance(row, dict):
+                    continue
+                ad_id = str(row.get("ad_id") or "")
+                phone = _phone_from_row(row)
+                if ad_id and phone:
+                    found[ad_id] = phone
+                    got += 1
+            meta = payload.get("meta") or {}
+            logger.info(
+                f"SPFA phone: успешно {meta.get('success', got)}/{meta.get('ads', len(chunk))}, "
+                f"{meta.get('time_sec', '?')} сек"
+            )
+            if got or attempt == 2:
+                break
+            logger.warning("SPFA phone: пустой ответ, повторяю запрос")
+            time.sleep(2)
+        if payload and not any(_phone_from_row(row) for row in (payload.get("results") or []) if isinstance(row, dict)):
+            logger.warning(
+                "SPFA вернул null по всем ID — это гостевые номера без авторизации. "
+                "На сайте Avito под аккаунтом номер виден, у API его нет"
+            )
+    return found
+
+
+def unblock_cookies(session: dict, api_key: str, proxy_string: str) -> dict | None:
+    from cookie_pool import load_config, unblock_one
+
+    return unblock_one(session, load_config())
 
 
 def fetch_page(client: curl_requests.Session, url: str, attempts: int = 3) -> tuple[int, dict | None]:
@@ -389,8 +515,21 @@ def rotate_ip(cfg: dict, session: dict) -> dict:
 
 
 def refresh_cookies(cfg: dict, session: dict) -> dict:
-    logger.warning("403/439: обновляю cookies, IP не меняю")
-    unblock_cookies(session, cfg["cookies_api_key"], cfg["proxy_string"])
+    from cookie_pool import acquire, mark_blocked
+
+    current_id = session.get("id")
+    logger.warning(f"403/439: отдаю id={current_id} в пул и беру разблокированный")
+    mark_blocked(current_id)
+    nxt = acquire(exclude=current_id)
+    if nxt:
+        return nxt
+    for attempt in range(1, 7):
+        logger.info(f"Пул пока без готового набора, жду сервис ({attempt}/6)")
+        time.sleep(5)
+        nxt = acquire(exclude=current_id)
+        if nxt:
+            return nxt
+    logger.warning("Пул не дал набор, покупаю новый")
     return buy_cookies(cfg["cookies_api_key"], cfg["proxy_string"])
 
 
@@ -427,7 +566,7 @@ def fetch_items(cfg: dict, session: dict) -> tuple[dict, int, list[dict], bool]:
             status, payload = fetch_page(client, url)
 
         if status in (403, 439):
-            logger.warning(f"{status}: беру новые cookies")
+            logger.warning(f"{status}: беру разблокированные cookies из пула")
             session = refresh_cookies(cfg, session)
             client = build_client(session, cfg["proxy_string"])
             status, payload = fetch_page(client, url)
@@ -462,11 +601,13 @@ def parse_once(cfg: dict, session: dict, seen: set[int], first: bool) -> tuple[d
     ordinary = []
     promoted = 0
     skipped_title = 0
+    skipped_seller = 0
     too_late = 0
     max_age = int(cfg.get("max_age") or 0)
     notify_max_age = int(cfg.get("notify_max_age") or 0)
     must_contain = cfg.get("title_must_contain") or []
     skip = cfg.get("title_skip") or []
+    seller_skip = cfg.get("seller_skip") or []
     for item in items:
         try:
             ad_id = int(item["id"])
@@ -478,6 +619,9 @@ def parse_once(cfg: dict, session: dict, seen: set[int], first: bool) -> tuple[d
         seen.add(ad_id)
         if cfg.get("ignore_promotion", True) and is_promoted(item):
             promoted += 1
+            continue
+        if seller_is_skipped(item, seller_skip):
+            skipped_seller += 1
             continue
         if not is_fresh(item, max_age):
             continue
@@ -493,6 +637,7 @@ def parse_once(cfg: dict, session: dict, seen: set[int], first: bool) -> tuple[d
     ordinary.sort(key=lambda item: item.get("sortTimeStamp") or 0, reverse=True)
     logger.info(
         f"Свежих: {len(ordinary)}, продвинутых скрыто: {promoted}"
+        + (f", продавец скрыт: {skipped_seller}" if skipped_seller else "")
         + (f", не iPhone: {skipped_title}" if skipped_title else "")
         + (f", поздно в выдаче: {too_late}" if too_late else "")
     )
@@ -510,6 +655,14 @@ def parse_once(cfg: dict, session: dict, seen: set[int], first: bool) -> tuple[d
         logger.info("Новых объявлений нет")
         to_show = []
 
+    if to_show:
+        phones = fetch_phones(cfg.get("cookies_api_key") or "", [item.get("id") for item in to_show])
+        for item in to_show:
+            phone = phones.get(str(item.get("id")))
+            if phone:
+                item["phone"] = phone
+        logger.info(f"Телефоны получены: {sum(1 for item in to_show if item.get('phone'))}/{len(to_show)}")
+
     for item in to_show:
         print("\n" + "=" * 40)
         print(format_ad(item))
@@ -525,6 +678,9 @@ def main() -> None:
     Path("logs").mkdir(exist_ok=True)
     logger.add("logs/parser.log", rotation="2 MB", retention="3 days")
     cfg = load_config()
+    from cookie_service import start_background
+
+    start_background()
     ensure_proxy_bypasses_vpn()
     start_server(int(cfg.get("web_port") or 8765))
     clear_ads()
@@ -532,7 +688,7 @@ def main() -> None:
     seen = set()
     save_seen(seen)
     pause_min = max(3, int(cfg.get("pause_general") or 5))
-    logger.info(f"Новая сессия, мониторю {cfg['api_url']}")
+    logger.info(f"Новая сессия, cookies id={session.get('id')}, мониторю {cfg['api_url']}")
     first = True
     while True:
         blocked = False
