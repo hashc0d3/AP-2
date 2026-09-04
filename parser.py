@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
 import subprocess
 import time
@@ -20,8 +21,29 @@ COOKIES_PATH = STORAGE_DIR / "cookies.json"
 SEEN_PATH = STORAGE_DIR / "seen.json"
 SPFA_COOKIES_URL = "https://spfa.pro/api/cookies/mobile/"
 SPFA_UNBLOCK_URL = "https://spfa.pro/api/unblock/"
-SPFA_PHONE_URL = "https://spfa.pro/api/phone/"
 PROXY_HOSTS = ("mproxy.site", "fproxy.site", "bproxy.site", "gproxy.site")
+_CALL_KEYS = (
+    "canCall",
+    "can_call",
+    "hasPhone",
+    "has_phone",
+    "isPhoneVisible",
+    "phoneAvailable",
+    "isAvailableForCalls",
+    "callAvailable",
+)
+_MESSAGE_KEYS = (
+    "canWrite",
+    "can_write",
+    "canMessage",
+    "hasMessenger",
+    "has_messenger",
+    "messengerAvailable",
+    "isAvailableForMessages",
+    "messageAvailable",
+    "chatAvailable",
+)
+_HIDDEN_PHONE_KEYS = ("isPhoneHidden", "phoneHidden", "isPhoneDisabled")
 
 
 def load_config() -> dict:
@@ -30,11 +52,11 @@ def load_config() -> dict:
 
 
 def load_session() -> dict:
-    from cookie_pool import acquire, current
+    from cookie_pool import current, wait_ready_cookie
 
-    session = current() or acquire()
+    session = current() or wait_ready_cookie()
     if not session:
-        raise RuntimeError("Пул cookies пуст — запустите cookie_service.py")
+        raise RuntimeError("Пул cookies пуст — нет готового набора")
     return session
 
 
@@ -292,13 +314,79 @@ def _image_urls(value, out: list[str]) -> None:
             _image_urls(val, out)
 
 
+def _as_bool(value) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    return None
+
+
+def _first_bool(obj: dict, keys: tuple[str, ...]) -> bool | None:
+    for key in keys:
+        if key in obj:
+            found = _as_bool(obj.get(key))
+            if found is not None:
+                return found
+    return None
+
+
+def _iva_has_action(item: dict, *needles: str) -> bool:
+    iva = item.get("iva")
+    if not isinstance(iva, dict):
+        return False
+    wanted = tuple(n.lower() for n in needles)
+    stack: list = list(iva.values())
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, dict):
+            title = str(cur.get("title") or cur.get("type") or cur.get("id") or "").lower()
+            if any(word in title for word in wanted):
+                return True
+            stack.extend(cur.values())
+        elif isinstance(cur, list):
+            stack.extend(cur)
+    return False
+
+
+def contact_flags(item: dict) -> tuple[bool, bool]:
+    blobs: list[dict] = [item]
+    for key in ("contacts", "contact", "seller", "user"):
+        blob = item.get(key)
+        if isinstance(blob, dict):
+            blobs.append(blob)
+
+    can_call = None
+    can_message = None
+    for blob in blobs:
+        if can_call is None:
+            hidden = _first_bool(blob, _HIDDEN_PHONE_KEYS)
+            if hidden is True:
+                can_call = False
+            elif hidden is False:
+                can_call = True
+        if can_call is None:
+            can_call = _first_bool(blob, _CALL_KEYS)
+        if can_call is None:
+            can_call = _as_bool(blob.get("phone"))
+        if can_message is None:
+            can_message = _first_bool(blob, _MESSAGE_KEYS)
+        if can_message is None:
+            for key in ("messenger", "message", "chat"):
+                can_message = _as_bool(blob.get(key))
+                if can_message is not None:
+                    break
+
+    if can_call is None:
+        can_call = _iva_has_action(item, "call", "phone", "позвон")
+    if can_message is None:
+        can_message = _iva_has_action(item, "message", "messenger", "write", "chat", "написа")
+    return bool(can_call), bool(can_message)
+
+
 def serialize_ad(item: dict) -> dict:
     images: list[str] = []
     _image_urls(item.get("gallery"), images)
     _image_urls(item.get("images"), images)
-    phone = item.get("phone")
-    if not isinstance(phone, str) or not phone.strip():
-        phone = None
+    can_call, can_message = contact_flags(item)
     published = published_at(item)
     age = age_seconds(item)
     published_text = format_age(age)
@@ -315,8 +403,8 @@ def serialize_ad(item: dict) -> dict:
         "address": ad_address(item),
         "url": ad_url(item),
         "images": images[:12],
-        "phone": phone,
-        "can_call": bool(phone),
+        "can_call": can_call,
+        "can_message": can_message,
         "seller": seller,
         "published": published_text,
         "ts": int(time.time()),
@@ -334,9 +422,9 @@ def format_ad(item: dict) -> str:
     age_part = f"{age}  |  " if age else ""
     seller = seller_name(item)
     seller_part = f"  |  {seller}" if seller else ""
-    phone = item.get("phone")
-    phone_part = f"\n{phone}" if isinstance(phone, str) and phone.strip() else ""
-    return f"{title}\n{age_part}{price}  |  {address}{seller_part}{phone_part}\n{url}"
+    can_call, can_message = contact_flags(item)
+    contact_part = f"\nзвонок: {'да' if can_call else 'нет'}  |  сообщение: {'да' if can_message else 'нет'}"
+    return f"{title}\n{age_part}{price}  |  {address}{seller_part}{contact_part}\n{url}"
 
 
 def wifi_gateway() -> str | None:
@@ -358,6 +446,8 @@ def wifi_gateway() -> str | None:
 
 def ensure_proxy_bypasses_vpn() -> None:
     """VPN оставляем для смены IP; трафик к шлюзу мобильного прокси идёт напрямую по Wi‑Fi."""
+    if os.name != "nt" or os.environ.get("SKIP_VPN_BYPASS") == "1":
+        return
     gateway = wifi_gateway()
     if not gateway:
         logger.warning("Не нашёл Wi‑Fi шлюз, split-tunnel для прокси не настроен")
@@ -407,79 +497,6 @@ def buy_cookies(api_key: str, proxy_string: str) -> dict:
     return buy_one(load_config())
 
 
-def _phone_from_row(row: dict) -> str | None:
-    phone = row.get("phone") or row.get("number") or row.get("tel")
-    if isinstance(phone, dict):
-        phone = phone.get("phone") or phone.get("number") or phone.get("value")
-    if isinstance(phone, int):
-        phone = str(phone)
-    if isinstance(phone, str):
-        phone = phone.strip()
-        if phone and phone.lower() not in {"null", "none", "-"}:
-            return phone
-    return None
-
-
-def fetch_phones(api_key: str, ad_ids: list) -> dict[str, str]:
-    found: dict[str, str] = {}
-    ids = [str(ad_id) for ad_id in ad_ids if ad_id]
-    if not ids or not api_key:
-        return found
-    for offset in range(0, len(ids), 50):
-        chunk = ids[offset : offset + 50]
-        logger.info(f"Запрашиваю телефоны SPFA для {len(chunk)} объявлений")
-        payload = None
-        for attempt in (1, 2):
-            try:
-                response = std_requests.post(
-                    SPFA_PHONE_URL,
-                    json={"api_key": api_key, "ads": chunk},
-                    headers={"Accept": "application/json", "Content-Type": "application/json"},
-                    timeout=90,
-                )
-            except std_requests.RequestException as err:
-                logger.warning(f"SPFA phone: сеть {err}")
-                break
-            if response.status_code == 403:
-                logger.warning("SPFA phone: 403 — метод недоступен без реального пополнения баланса")
-                return found
-            if not response.ok:
-                logger.warning(f"SPFA phone {response.status_code}: {response.text[:300]}")
-                break
-            try:
-                payload = response.json()
-            except ValueError:
-                logger.warning("SPFA phone: ответ не JSON")
-                break
-            if not payload.get("success"):
-                logger.warning(f"SPFA phone: {payload}")
-                break
-            got = 0
-            for row in payload.get("results") or []:
-                if not isinstance(row, dict):
-                    continue
-                ad_id = str(row.get("ad_id") or "")
-                phone = _phone_from_row(row)
-                if ad_id and phone:
-                    found[ad_id] = phone
-                    got += 1
-            meta = payload.get("meta") or {}
-            logger.info(
-                f"SPFA phone: успешно {meta.get('success', got)}/{meta.get('ads', len(chunk))}, "
-                f"{meta.get('time_sec', '?')} сек"
-            )
-            if got or attempt == 2:
-                break
-            logger.warning("SPFA phone: пустой ответ, повторяю запрос")
-            time.sleep(2)
-        if payload and not any(_phone_from_row(row) for row in (payload.get("results") or []) if isinstance(row, dict)):
-            logger.warning(
-                "SPFA вернул null по всем ID — это гостевые номера без авторизации. "
-                "На сайте Avito под аккаунтом номер виден, у API его нет"
-            )
-    return found
-
-
 def unblock_cookies(session: dict, api_key: str, proxy_string: str) -> dict | None:
     from cookie_pool import load_config, unblock_one
 
@@ -509,27 +526,38 @@ def fetch_page(client: curl_requests.Session, url: str, attempts: int = 3) -> tu
 
 
 def rotate_ip(cfg: dict, session: dict) -> dict:
-    logger.warning("Меняю только IP, cookies не трогаю")
+    logger.warning("Меняю IP")
     change_ip(cfg["proxy_change_url"])
     return session
 
 
+def session_is_ready(session: dict | None) -> bool:
+    if not session or not session.get("id"):
+        return False
+    from cookie_pool import load_slot
+
+    fresh = load_slot(session["id"])
+    if not fresh:
+        return False
+    if fresh.get("status") in {"blocked", "dead"}:
+        return False
+    return bool(fresh.get("unblock_ok"))
+
+
 def refresh_cookies(cfg: dict, session: dict) -> dict:
-    from cookie_pool import acquire, mark_blocked
+    from cookie_pool import mark_blocked, wait_ready_cookie
 
     current_id = session.get("id")
-    logger.warning(f"403/439: отдаю id={current_id} в пул и беру разблокированный")
+    logger.warning(f"403/439: cookie id={current_id} сгорел, меняю IP и беру другой набор")
     mark_blocked(current_id)
-    nxt = acquire(exclude=current_id)
+    try:
+        rotate_ip(cfg, session)
+    except Exception as err:
+        logger.warning(f"Не удалось сменить IP: {err}")
+    nxt = wait_ready_cookie(exclude=current_id)
     if nxt:
         return nxt
-    for attempt in range(1, 7):
-        logger.info(f"Пул пока без готового набора, жду сервис ({attempt}/6)")
-        time.sleep(5)
-        nxt = acquire(exclude=current_id)
-        if nxt:
-            return nxt
-    logger.warning("Пул не дал набор, покупаю новый")
+    logger.warning("Пул не дал готовый набор, покупаю новый")
     return buy_cookies(cfg["cookies_api_key"], cfg["proxy_string"])
 
 
@@ -543,12 +571,22 @@ def recover_connection(cfg: dict, session: dict) -> dict:
 
 
 def fetch_items(cfg: dict, session: dict) -> tuple[dict, int, list[dict], bool]:
-    client = build_client(session, cfg["proxy_string"])
+    from cookie_pool import wait_ready_cookie
+
+    if not session_is_ready(session):
+        session = wait_ready_cookie()
+        if not session:
+            logger.error("Нет готового cookie — не бью Avito заблокированным набором")
+            return session, 0, [], True
+
     pages = max(1, int(cfg.get("pages") or 1))
+    page_pause = max(0, int(cfg.get("pause_between_pages") or 2))
     items: list[dict] = []
     seen_ids: set[int] = set()
     status = 0
     blocked = False
+    client = build_client(session, cfg["proxy_string"])
+    logger.info(f"Цикл на cookie id={session.get('id')}")
 
     for page in range(1, pages + 1):
         url = api_url_for_page(cfg["api_url"], page)
@@ -560,13 +598,13 @@ def fetch_items(cfg: dict, session: dict) -> tuple[dict, int, list[dict], bool]:
             status, payload = fetch_page(client, url)
 
         if status == 429:
-            logger.warning("429: меняю только IP")
+            logger.warning("429: бан по IP, меняю IP, cookie оставляю")
             session = rotate_ip(cfg, session)
             client = build_client(session, cfg["proxy_string"])
             status, payload = fetch_page(client, url)
 
         if status in (403, 439):
-            logger.warning(f"{status}: беру разблокированные cookies из пула")
+            logger.warning(f"{status}: cookie или IP сгорели")
             session = refresh_cookies(cfg, session)
             client = build_client(session, cfg["proxy_string"])
             status, payload = fetch_page(client, url)
@@ -585,6 +623,8 @@ def fetch_items(cfg: dict, session: dict) -> tuple[dict, int, list[dict], bool]:
             items.append(item)
         if len(page_items) < 10:
             break
+        if page < pages and page_pause:
+            time.sleep(page_pause)
 
     return session, status, items, blocked
 
@@ -656,12 +696,11 @@ def parse_once(cfg: dict, session: dict, seen: set[int], first: bool) -> tuple[d
         to_show = []
 
     if to_show:
-        phones = fetch_phones(cfg.get("cookies_api_key") or "", [item.get("id") for item in to_show])
-        for item in to_show:
-            phone = phones.get(str(item.get("id")))
-            if phone:
-                item["phone"] = phone
-        logger.info(f"Телефоны получены: {sum(1 for item in to_show if item.get('phone'))}/{len(to_show)}")
+        flags = [contact_flags(item) for item in to_show]
+        logger.info(
+            f"Контакты: звонок {sum(c for c, _ in flags)}/{len(to_show)}, "
+            f"сообщение {sum(m for _, m in flags)}/{len(to_show)}"
+        )
 
     for item in to_show:
         print("\n" + "=" * 40)
@@ -673,6 +712,7 @@ def parse_once(cfg: dict, session: dict, seen: set[int], first: bool) -> tuple[d
 
 
 def main() -> None:
+    from avito_search import apply_runtime, sleep_or_restart, snapshot as search_snapshot, wait_for_search
     from webui import clear_ads, publish_ads, start_server
 
     Path("logs").mkdir(exist_ok=True)
@@ -685,30 +725,60 @@ def main() -> None:
     start_server(int(cfg.get("web_port") or 8765))
     clear_ads()
     session = load_session()
-    seen = set()
-    save_seen(seen)
     pause_min = max(3, int(cfg.get("pause_general") or 5))
-    logger.info(f"Новая сессия, cookies id={session.get('id')}, мониторю {cfg['api_url']}")
-    first = True
+    generation = 0
+    logger.info(f"Новая сессия, cookies id={session.get('id')}. Жду «Начать поиск» в веб-интерфейсе")
     while True:
-        blocked = False
-        try:
-            session, seen, shown, blocked = parse_once(cfg, session, seen, first)
-            if shown:
-                publish_ads([serialize_ad(item) for item in shown])
-            first = False
-        except Exception as err:
-            blocked = True
-            logger.error(f"Ошибка цикла: {err}")
+        search = wait_for_search(generation)
+        generation = int(search["generation"])
+        runtime = apply_runtime(cfg, search)
+        seen = set()
+        save_seen(seen)
+        first = True
+        query = search.get("query") or "все объявления"
+        region_name = (search.get("region") or {}).get("name") or ""
+        logger.info(f"Старт мониторинга: {query} · {region_name}")
+        logger.info(f"Web URL: {runtime['url']}")
+        logger.info(f"API URL: {runtime['api_url']}")
+        while True:
+            blocked = False
             try:
-                session = rotate_ip(cfg, session)
-            except Exception as rec_err:
-                logger.warning(f"Не удалось сменить IP: {rec_err}")
-        if blocked:
-            logger.info("После блока сразу следующий запрос, без паузы")
-            continue
-        logger.info(f"Пауза {pause_min} сек.")
-        time.sleep(pause_min)
+                session, seen, shown, blocked = parse_once(runtime, session, seen, first)
+                if shown:
+                    publish_ads([serialize_ad(item) for item in shown])
+                first = False
+            except Exception as err:
+                blocked = True
+                logger.error(f"Ошибка цикла: {err}")
+                try:
+                    session = rotate_ip(runtime, session)
+                except Exception as rec_err:
+                    logger.warning(f"Не удалось сменить IP: {rec_err}")
+            from subscription import is_active
+
+            if not is_active():
+                logger.info("Подписка неактивна, останавливаю мониторинг")
+                from avito_search import stop_search
+                stop_search()
+                break
+            state = search_snapshot()
+            if not state["running"] or state["generation"] != generation:
+                if not state["running"]:
+                    logger.info("Мониторинг остановлен, жду новый запуск")
+                else:
+                    logger.info("Поисковый запрос обновлён, перезапускаю мониторинг")
+                break
+            if blocked:
+                logger.info("После блока сразу следующий запрос, без паузы")
+                continue
+            logger.info(f"Пауза {pause_min} сек.")
+            if not sleep_or_restart(pause_min, generation):
+                state = search_snapshot()
+                if not state["running"]:
+                    logger.info("Мониторинг остановлен, жду новый запуск")
+                else:
+                    logger.info("Поисковый запрос обновлён, перезапускаю мониторинг")
+                break
 
 
 if __name__ == "__main__":

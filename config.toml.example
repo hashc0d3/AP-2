@@ -1,0 +1,26 @@
+[avito]
+# Поиск по умолчанию (можно сменить в веб-интерфейсе)
+url = "https://www.avito.ru/all/telefony?owner[]=private&s=104"
+api_url = "https://www.avito.ru/web/1/js/items?categoryId=84&owner%5B0%5D=private&presentationType=serp&privateOnly=1&sort=date"
+
+# Мобильный прокси
+proxy_string = "user:pass@mproxy.site:20085"
+socks5_proxy = "user:pass@bproxy.site:20085"
+proxy_change_url = "https://aproxy.site/?proxy_key=YOUR_PROXY_KEY"
+
+# API cookies (spfa.pro)
+cookies_api_key = "sk_live_YOUR_KEY"
+cookie_pool_size = 5
+cookie_unblock_pause = 60
+
+ignore_promotion = true
+seller_skip = ["re:premium"]
+max_age = 300
+notify_max_age = 0
+pages = 1
+pause_between_pages = 2
+title_must_contain = []
+title_skip = ["книга", "книг", "журнал", "комикс", "чехол", "кабель", "зарядк"]
+pause_general = 12
+pause_max = 40
+web_port = 8765

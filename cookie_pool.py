@@ -18,7 +18,7 @@ LEGACY_PATH = STORAGE_DIR / "cookies.json"
 LIFECYCLE_LOG = Path("logs") / "cookie_lifecycle.log"
 SPFA_COOKIES_URL = "https://spfa.pro/api/cookies/mobile/"
 SPFA_UNBLOCK_URL = "https://spfa.pro/api/unblock/"
-DEFAULT_POOL_SIZE = 3
+DEFAULT_POOL_SIZE = 5
 
 
 def _fmt_dur(seconds: float | None) -> str | None:
@@ -282,23 +282,49 @@ def mark_blocked(cookie_id) -> None:
     logger.info(f"Пул: id={cookie_id} помечен blocked, работал {_fmt_dur(used_for) or '?'}")
 
 
-def acquire(exclude=None) -> dict | None:
+def usable_slots(exclude=None) -> list[dict]:
+    """Только наборы, которые сервису уже удалось разблокировать."""
     exclude_id = str(exclude) if exclude is not None else None
-    candidates = []
+    slots = []
     for slot in alive_slots():
         if str(slot.get("id")) == exclude_id:
             continue
-        if slot.get("status") == "in_use":
+        if slot.get("status") in {"blocked", "dead"}:
             continue
-        candidates.append(slot)
-    ready = [slot for slot in candidates if slot.get("status") == "ready" and slot.get("unblock_ok")]
-    pool = ready or [slot for slot in candidates if slot.get("status") == "ready"] or candidates
-    pool.sort(key=lambda slot: slot.get("last_unblock_at") or 0, reverse=True)
+        if not slot.get("unblock_ok"):
+            continue
+        if slot.get("status") not in {"ready", "in_use"}:
+            continue
+        slots.append(slot)
+    return slots
+
+
+def wait_ready_cookie(exclude=None, attempts: int = 8, pause: float = 3) -> dict | None:
+    """Ждёт, пока сервис пула вернёт хотя бы один ready-набор."""
+    for attempt in range(1, attempts + 1):
+        chosen = next_cookie(exclude)
+        if chosen:
+            return chosen
+        logger.info(f"Пул без готовых cookies, жду сервис ({attempt}/{attempts})")
+        time.sleep(pause)
+    return None
+
+
+def next_cookie(exclude=None) -> dict | None:
+    """Следующий готовый набор. Вызывать только при старте или после блока."""
+    pool = usable_slots(exclude)
     if not pool:
         return None
-    chosen = pool[0]
+    pool.sort(key=lambda slot: str(slot.get("id")))
+    data = load_pool()
+    last = data.get("cursor") or data.get("active_id")
+    ids = [str(slot["id"]) for slot in pool]
+    index = 0
+    if last is not None and str(last) in ids:
+        index = (ids.index(str(last)) + 1) % len(ids)
+    chosen = pool[index]
     for slot in list_slots():
-        if slot.get("status") == "in_use" and slot.get("id") != chosen["id"]:
+        if slot.get("status") == "in_use" and str(slot.get("id")) != str(chosen["id"]):
             slot["status"] = "ready"
             save_slot(slot)
     now = time.time()
@@ -312,7 +338,7 @@ def acquire(exclude=None) -> dict | None:
     chosen["status"] = "in_use"
     chosen["last_used_at"] = now
     save_slot(chosen)
-    save_pool({"active_id": chosen["id"]})
+    save_pool({"active_id": chosen["id"], "cursor": chosen["id"]})
     _write_json(LEGACY_PATH, chosen)
     log_lifecycle(
         "acquired",
@@ -320,6 +346,7 @@ def acquire(exclude=None) -> dict | None:
         from_status=prev_status,
         recovered_in=_fmt_dur(recovered_in),
         idle_ready=_fmt_dur(idle_ready),
+        rotate=f"{index + 1}/{len(ids)}",
     )
     extra = []
     if recovered_in is not None:
@@ -327,15 +354,23 @@ def acquire(exclude=None) -> dict | None:
     if idle_ready is not None:
         extra.append(f"ждал в ready {_fmt_dur(idle_ready)}")
     suffix = f" ({', '.join(extra)})" if extra else ""
-    logger.info(f"Пул: парсеру выдан id={chosen['id']}{suffix}")
+    logger.info(f"Пул: запрос на id={chosen['id']} [{index + 1}/{len(ids)}]{suffix}")
     return chosen
+
+
+def acquire(exclude=None) -> dict | None:
+    return next_cookie(exclude)
 
 
 def current() -> dict | None:
     active_id = load_pool().get("active_id")
     if active_id:
         session = load_slot(active_id)
-        if session and session.get("status") != "dead":
+        if (
+            session
+            and session.get("status") not in {"dead", "blocked"}
+            and session.get("unblock_ok")
+        ):
             if session.get("status") != "in_use":
                 session["status"] = "in_use"
                 save_slot(session)
@@ -348,6 +383,9 @@ def maintain(cfg: dict | None = None) -> None:
     ensure_pool(cfg)
     for slot in list_slots():
         if slot.get("status") == "dead":
+            continue
+        needs_unblock = slot.get("status") == "blocked" or not slot.get("unblock_ok")
+        if not needs_unblock:
             continue
         unblock_one(slot, cfg)
         time.sleep(2)

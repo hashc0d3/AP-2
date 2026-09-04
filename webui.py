@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
 import sys
 import threading
@@ -11,6 +12,18 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+
+from avito_search import list_categories, preview, search_regions, snapshot, start_search, stop_search
+from subscription import (
+    activate_trial,
+    is_active,
+    logout,
+    public_status,
+    quote_promo,
+    send_sms,
+    verify_phone,
+    pay as pay_subscription,
+)
 
 _DISCONNECT = (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, TimeoutError)
 
@@ -43,7 +56,7 @@ def _save_disk() -> None:
     ADS_PATH.write_text(json.dumps(_ads, ensure_ascii=False), encoding="utf-8")
 
 
-def snapshot() -> list[dict]:
+def snapshot_ads() -> list[dict]:
     with _lock:
         return list(_ads)
 
@@ -126,15 +139,86 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
         self.close_connection = True
 
+    def _json(self, code: int, data: dict | list) -> None:
+        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self._send(code, body, "application/json; charset=utf-8")
+
+    def _require_sub(self) -> bool:
+        if is_active():
+            return True
+        self._json(403, {"error": "Нет активной подписки", "code": "no_subscription"})
+        return False
+
+    def _serve_static(self, rel: str) -> bool:
+        path = (STATIC_DIR / rel).resolve()
+        if STATIC_DIR.resolve() not in path.parents and path != STATIC_DIR.resolve():
+            return False
+        if not path.is_file():
+            return False
+        suffix = path.suffix.lower()
+        types = {
+            ".html": "text/html; charset=utf-8",
+            ".js": "text/javascript; charset=utf-8",
+            ".css": "text/css; charset=utf-8",
+            ".svg": "image/svg+xml",
+            ".map": "application/json; charset=utf-8",
+            ".woff2": "font/woff2",
+            ".png": "image/png",
+            ".ico": "image/x-icon",
+        }
+        cache = "no-store" if suffix == ".html" else "public, max-age=86400"
+        data = path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", types.get(suffix, "application/octet-stream"))
+        self.send_header("Cache-Control", cache)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(data)
+        self.close_connection = True
+        return True
+
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path in {"/", "/index.html"}:
-            path = STATIC_DIR / "index.html"
-            self._send(200, path.read_bytes(), "text/html; charset=utf-8")
+            if not self._serve_static("index.html"):
+                self.send_error(404)
+            return
+        if parsed.path.startswith("/assets/"):
+            if not self._serve_static(parsed.path.lstrip("/")):
+                self.send_error(404)
+            return
+        if parsed.path == "/api/billing/status":
+            self._json(200, public_status())
             return
         if parsed.path == "/api/ads":
-            body = json.dumps(snapshot(), ensure_ascii=False).encode("utf-8")
+            if not self._require_sub():
+                return
+            self._json(200, snapshot_ads())
+            return
+        if parsed.path == "/api/search":
+            query = parse_qs(parsed.query)
+            q = (query.get("q") or [""])[0]
+            region = (query.get("region") or [""])[0]
+            category = (query.get("category") or [""])[0]
+            try:
+                data = preview(q, region, category)
+            except ValueError as err:
+                self._send(400, json.dumps({"error": str(err)}, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+                return
+            self._send(200, json.dumps(data, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+            return
+        if parsed.path == "/api/categories":
+            body = json.dumps(list_categories(), ensure_ascii=False).encode("utf-8")
             self._send(200, body, "application/json; charset=utf-8")
+            return
+        if parsed.path == "/api/regions":
+            needle = (parse_qs(parsed.query).get("q") or [""])[0]
+            body = json.dumps(search_regions(needle), ensure_ascii=False).encode("utf-8")
+            self._send(200, body, "application/json; charset=utf-8")
+            return
+        if parsed.path == "/api/status":
+            self._json(200, snapshot() | {"subscription": public_status()})
             return
         if parsed.path == "/img":
             url = (parse_qs(parsed.query).get("u") or [""])[0]
@@ -171,6 +255,9 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             return
         if parsed.path == "/events":
+            if not is_active():
+                self._json(403, {"error": "Нет активной подписки", "code": "no_subscription"})
+                return
             self.close_connection = True
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -184,7 +271,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 self.wfile.write(b": connected\n\n")
                 self.wfile.flush()
-                initial = snapshot()
+                initial = snapshot_ads()
                 if initial:
                     payload = json.dumps(initial, ensure_ascii=False)
                     self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
@@ -210,25 +297,106 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_error(404)
 
+    def _read_json(self) -> dict:
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length) if length else b"{}"
+        if not raw:
+            return {}
+        data = json.loads(raw.decode("utf-8"))
+        return data if isinstance(data, dict) else {}
+
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path == "/api/billing/sms":
+            try:
+                payload = self._read_json()
+                self._json(200, send_sms(str(payload.get("phone") or "")))
+            except ValueError as err:
+                self._json(400, {"error": str(err)})
+            return
+        if parsed.path == "/api/auth/verify":
+            try:
+                payload = self._read_json()
+                self._json(200, verify_phone(str(payload.get("phone") or ""), str(payload.get("code") or "")))
+            except ValueError as err:
+                self._json(400, {"error": str(err)})
+            return
+        if parsed.path == "/api/auth/logout":
+            self._json(200, logout())
+            return
+        if parsed.path == "/api/billing/promo":
+            try:
+                payload = self._read_json()
+                self._json(200, quote_promo(str(payload.get("code") or "")))
+            except ValueError as err:
+                self._json(400, {"error": str(err)})
+            return
+        if parsed.path == "/api/billing/trial":
+            try:
+                self._json(200, activate_trial())
+            except ValueError as err:
+                self._json(400, {"error": str(err)})
+            return
+        if parsed.path == "/api/billing/pay":
+            try:
+                payload = self._read_json()
+                data = pay_subscription(
+                    promo=str(payload.get("promo") or ""),
+                    phone=str(payload.get("phone") or ""),
+                    code=str(payload.get("code") or ""),
+                )
+                self._json(200, data)
+            except ValueError as err:
+                self._json(400, {"error": str(err)})
+            return
         if parsed.path == "/api/reset":
+            if not self._require_sub():
+                return
             count = clear_ads()
-            body = json.dumps({"ok": True, "cleared": count}, ensure_ascii=False).encode("utf-8")
-            self._send(200, body, "application/json; charset=utf-8")
+            self._json(200, {"ok": True, "cleared": count})
+            return
+        if parsed.path == "/api/search":
+            if not self._require_sub():
+                return
+            try:
+                payload = self._read_json()
+            except ValueError:
+                self._json(400, {"error": "Некорректный JSON"})
+                return
+            query = str(payload.get("query") or "")
+            region = str(payload.get("region") or payload.get("slug") or "")
+            category = str(payload.get("category") or "")
+            try:
+                data = start_search(query, region, category)
+            except ValueError as err:
+                self._json(400, {"error": str(err)})
+                return
+            except RuntimeError as err:
+                logger.warning(f"Старт поиска: {err}")
+                self._json(502, {"error": str(err)})
+                return
+            clear_ads()
+            self._json(200, {"ok": True, **data})
+            return
+        if parsed.path == "/api/search/stop":
+            data = stop_search()
+            self._json(200, {"ok": True, **data})
             return
         self.send_error(404)
 
 
 def start_server(port: int = 8765) -> None:
     _load_disk()
+    host = os.environ.get("WEB_HOST", "127.0.0.1")
     try:
-        httpd = QuietServer(("127.0.0.1", port), Handler)
+        httpd = QuietServer((host, port), Handler)
     except OSError as err:
-        raise RuntimeError(f"Порт {port} занят — закройте старый parser.py и откройте http://127.0.0.1:{port}") from err
+        raise RuntimeError(f"Порт {port} занят — закройте старый parser.py и откройте http://{host}:{port}") from err
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
-    url = f"http://127.0.0.1:{port}"
-    logger.info(f"Веб-интерфейс: {url}")
-    threading.Timer(1.2, lambda: webbrowser.open(url)).start()
+    local_url = f"http://127.0.0.1:{port}"
+    bind_url = local_url if host in {"0.0.0.0", "::"} else f"http://{host}:{port}"
+    logger.info(f"Веб-интерфейс: {bind_url} (bind {host}:{port})")
+    if os.environ.get("WEB_OPEN_BROWSER", "1") == "1" and host in {"127.0.0.1", "localhost", "::1"}:
+        threading.Timer(1.2, lambda: webbrowser.open(local_url)).start()
     time.sleep(0.2)

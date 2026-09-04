@@ -6,3 +6,5 @@ storage/
 logs/
 .playwright/
 *.log
+node_modules/
+web/node_modules/

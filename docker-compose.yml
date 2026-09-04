@@ -1,0 +1,26 @@
+services:
+  parser:
+    build: .
+    image: parser1:latest
+    container_name: parser1
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8765}:8765"
+    environment:
+      WEB_HOST: "0.0.0.0"
+      WEB_OPEN_BROWSER: "0"
+      SKIP_VPN_BYPASS: "1"
+    volumes:
+      - ./config.toml:/app/config.toml:ro
+      - parser-storage:/app/storage
+      - parser-logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8765/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+
+volumes:
+  parser-storage:
+  parser-logs:

@@ -2,286 +2,178 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Avito — новые объявления</title>
-  <style>
-    :root {
-      --bg: #0f1419;
-      --card: #1a222c;
-      --line: #2a3542;
-      --text: #e8eef5;
-      --muted: #8b9bb0;
-      --price: #7dffa3;
-      --call: #16a34a;
-      --link: #3b82f6;
-      --new: #f59e0b;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: "Segoe UI", system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-    }
-    header {
-      position: sticky;
-      top: 0;
-      z-index: 10;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 16px;
-      padding: 14px 20px;
-      background: rgba(15, 20, 25, 0.92);
-      border-bottom: 1px solid var(--line);
-      backdrop-filter: blur(10px);
-    }
-    h1 { margin: 0; font-size: 18px; font-weight: 650; }
-    .status { color: var(--muted); font-size: 13px; }
-    .status.live::before {
-      content: "";
-      display: inline-block;
-      width: 8px; height: 8px;
-      margin-right: 6px;
-      border-radius: 50%;
-      background: #22c55e;
-      box-shadow: 0 0 8px #22c55e;
-    }
-    main {
-      max-width: 860px;
-      margin: 0 auto;
-      padding: 16px;
-      display: grid;
-      gap: 14px;
-    }
-    .empty { color: var(--muted); text-align: center; padding: 60px 16px; line-height: 1.5; }
-    .card {
-      display: grid;
-      grid-template-columns: 220px 1fr;
-      gap: 14px;
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      overflow: hidden;
-      animation: in .35s ease;
-    }
-    .card.fresh { outline: 1px solid var(--new); }
-    @keyframes in {
-      from { opacity: 0; transform: translateY(-10px); }
-      to { opacity: 1; transform: none; }
-    }
-    .gallery {
-      position: relative;
-      background: #0b0f13;
-      min-height: 180px;
-    }
-    .gallery img {
-      width: 100%;
-      height: 200px;
-      object-fit: cover;
-      display: block;
-    }
-    .gallery .ph {
-      height: 200px;
-      display: grid;
-      place-items: center;
-      color: var(--muted);
-      font-size: 13px;
-    }
-    .nav {
-      position: absolute;
-      top: 50%;
-      transform: translateY(-50%);
-      width: 28px; height: 28px;
-      border: 0;
-      border-radius: 50%;
-      background: rgba(0,0,0,.55);
-      color: #fff;
-      cursor: pointer;
-    }
-    .nav.prev { left: 8px; }
-    .nav.next { right: 8px; }
-    .body { padding: 12px 14px 14px 0; display: flex; flex-direction: column; gap: 8px; }
-    .price { color: var(--price); font-size: 22px; font-weight: 700; }
-    .title { font-size: 16px; line-height: 1.3; }
-    .addr { color: var(--muted); font-size: 13px; }
-    .seller { color: var(--muted); font-size: 13px; }
-    .phone {
-      color: #22c55e;
-      font-size: 18px;
-      font-weight: 700;
-      text-decoration: none;
-      letter-spacing: 0.02em;
-    }
-    .card.callable {
-      border-color: #16a34a;
-      box-shadow: 0 0 0 1px #16a34a66;
-    }
-    .btn.call.muted { opacity: 0.5; }
-    .actions { display: flex; gap: 8px; margin-top: auto; padding-top: 8px; }
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 9px 14px;
-      border-radius: 10px;
-      text-decoration: none;
-      font-weight: 650;
-      font-size: 14px;
-      color: #fff;
-    }
-    .btn.call { background: var(--call); }
-    .btn.open { background: var(--link); }
-    .header-right { display: flex; align-items: center; gap: 12px; }
-    .btn.reset {
-      background: transparent;
-      border: 1px solid var(--line);
-      color: var(--text);
-      cursor: pointer;
-    }
-    .btn.reset:hover { border-color: #ef4444; color: #fecaca; }
-    @media (max-width: 640px) {
-      .card { grid-template-columns: 1fr; }
-      .body { padding: 12px 14px 14px; }
-    }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Сигнал — новые объявления Avito</title>
+  <script type="module" crossorigin src="/assets/index-Djr0Ve_X.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-cMyIhLml.css">
 </head>
 <body>
-  <header>
-    <h1>iPhone · новые за 15 мин</h1>
-    <div class="header-right">
-      <button class="btn reset" id="reset" type="button">Сбросить</button>
-      <div class="status" id="status">подключение…</div>
+  <header class="sticky top-0 z-30 border-b border-edge bg-ink/90 backdrop-blur-md">
+    <div class="wrap shell-header">
+      <div class="shell-logo">Сигнал<span class="text-brand">.</span></div>
+      <nav class="shell-nav" aria-label="Разделы">
+        <button type="button" id="tab-plans" class="tab">Тарифы</button>
+        <button type="button" id="tab-monitor" class="tab">Мониторинг</button>
+      </nav>
+      <div class="shell-actions">
+        <span id="shell-badge" class="hidden max-w-[11rem] truncate rounded-full border border-edge px-2.5 py-1 text-[11px] text-blue-300 sm:inline-block sm:max-w-none sm:px-3 sm:py-1.5 sm:text-xs">
+          Нет аккаунта
+        </span>
+        <button class="btn-ghost btn-sm hidden" id="to-monitor" type="button">К ленте</button>
+        <button class="btn-ghost btn-sm" id="auth-btn" type="button">Войти</button>
+      </div>
     </div>
   </header>
-  <main id="feed"><div class="empty">Жду объявления за последние 15 минут…</div></main>
-  <script>
-    const feed = document.getElementById("feed");
-    const statusEl = document.getElementById("status");
-    const seen = new Set();
 
-    function imgSrc(url) {
-      return "/img?u=" + encodeURIComponent(url);
-    }
+  <section id="landing" class="page-section">
+    <div class="wrap hero-block">
+      <h1 class="max-w-2xl text-[1.75rem] leading-[1.12] font-bold tracking-tight sm:text-4xl sm:leading-[1.1] md:text-5xl">
+        Новые объявления Avito за 60–90 секунд
+      </h1>
+      <p class="mt-3 max-w-xl text-base leading-relaxed text-muted sm:mt-4 sm:text-lg">
+        Живая лента частных объявлений. Регион, категория, запрос.
+      </p>
+      <div class="hero-actions">
+        <button class="btn-primary w-full" id="hero-pay" type="button">Подписка 3 000 ₽</button>
+        <button class="btn-soft w-full" id="hero-trial" type="button">Пробный день</button>
+      </div>
+    </div>
 
-    function cardHtml(ad) {
-      const images = ad.images || [];
-      const gallery = images.length
-        ? `<img src="${imgSrc(images[0])}" alt="" data-i="0" />
-           ${images.length > 1 ? `<button class="nav prev" type="button">‹</button><button class="nav next" type="button">›</button>` : ""}`
-        : `<div class="ph">нет фото</div>`;
-      const callHref = ad.phone ? ("tel:" + ad.phone) : ad.url;
-      const imagesAttr = encodeURIComponent(JSON.stringify(images));
-      const phoneHtml = ad.phone
-        ? `<a class="phone" href="tel:${escapeHtml(ad.phone)}">${escapeHtml(ad.phone)}</a>`
-        : "";
-      const sellerHtml = ad.seller ? `<div class="seller">${escapeHtml(ad.seller)}</div>` : "";
-      return `<article class="card${ad.phone ? " callable" : ""}" data-id="${ad.id}">
-        <div class="gallery" data-images="${imagesAttr}">${gallery}</div>
-        <div class="body">
-          <div class="price">${escapeHtml(ad.price || "")}</div>
-          <div class="title">${escapeHtml(ad.title || "")}</div>
-          <div class="addr">${escapeHtml(ad.published ? ad.published + " · " : "")}${escapeHtml(ad.address || "")}</div>
-          ${sellerHtml}
-          ${phoneHtml}
-          <div class="actions">
-            <a class="btn call${ad.phone ? "" : " muted"}" href="${callHref}" ${ad.phone ? "" : 'target="_blank" rel="noopener"'}>Позвонить</a>
-            <a class="btn open" href="${ad.url}" target="_blank" rel="noopener">Открыть</a>
+    <div class="wrap feature-row">
+      <article class="panel">
+        <h3 class="text-base font-semibold">Только свежие</h3>
+        <p class="mt-2 hint">Объявления за последние минуты. Продвинутые скрыты.</p>
+      </article>
+      <article class="panel">
+        <h3 class="text-base font-semibold">Москва и регионы</h3>
+        <p class="mt-2 hint">Город и категория как на Avito.</p>
+      </article>
+      <article class="panel">
+        <h3 class="text-base font-semibold">Контакты сразу</h3>
+        <p class="mt-2 hint">Видно, доступны звонок и сообщение.</p>
+      </article>
+    </div>
+
+    <div class="wrap plans-row" id="plans">
+      <article class="panel flex flex-col">
+        <h3 class="text-base font-semibold">Пробный</h3>
+        <div class="mt-4 text-4xl font-bold tracking-tight">
+          0 ₽ <span class="text-base font-semibold text-muted">/ 24 часа</span>
+        </div>
+        <ul class="mt-4 space-y-1.5 pl-5 hint list-disc marker:text-edge">
+          <li>Весь поиск и лента</li>
+          <li>Один раз на аккаунт</li>
+        </ul>
+        <div class="mt-auto pt-6">
+          <button class="btn-soft w-full" id="plan-trial" type="button">Активировать</button>
+          <p class="mt-3 hint" id="trial-hint"></p>
+        </div>
+      </article>
+
+      <article class="panel flex flex-col border-brand ring-1 ring-brand/40">
+        <h3 class="text-base font-semibold">Подписка</h3>
+        <div class="mt-4 text-4xl font-bold tracking-tight" id="plan-price">
+          3 000 ₽ <span class="text-base font-semibold text-muted">/ 30 дней</span>
+        </div>
+        <div class="promo-row mt-4">
+          <input id="promo-input" type="text" class="field" placeholder="Промокод" />
+          <button id="promo-apply" type="button" class="btn-ghost w-full">Применить</button>
+        </div>
+        <p class="mt-3 hint text-xs sm:text-[13px]" id="promo-hint">WELCOME — 20%, AVITO500 — −500 ₽, START — месяц бесплатно</p>
+        <div class="mt-auto pt-6">
+          <button class="btn-primary w-full" id="plan-pay" type="button">Оформить за 3 000 ₽</button>
+        </div>
+      </article>
+    </div>
+
+    <p class="wrap pb-14 hint">Оплата учебная. Код из SMS всегда 1111.</p>
+  </section>
+
+  <div class="modal-back hidden" id="pay-modal">
+    <div class="panel relative">
+      <button class="absolute top-4 right-4 grid size-8 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-xl leading-none text-muted hover:bg-raised hover:text-body" id="pay-close" type="button" aria-label="Закрыть">×</button>
+      <h2 class="text-xl font-semibold" id="pay-title">Вход по телефону</h2>
+      <p class="mt-1.5 hint" id="pay-sum">Код 1111 создаёт учётную запись</p>
+
+      <div id="auth-step" class="mt-5 space-y-4">
+        <div class="space-y-1.5">
+          <label class="hint" for="pay-phone">Телефон</label>
+          <input id="pay-phone" type="tel" class="field" placeholder="+7 999 123-45-67" />
+        </div>
+        <div class="space-y-1.5">
+          <label class="hint" for="pay-code">Код из SMS</label>
+          <input id="pay-code" type="text" class="field" inputmode="numeric" placeholder="1111" maxlength="6" />
+        </div>
+        <p class="hint min-h-5" id="pay-hint"></p>
+        <div class="modal-actions">
+          <button class="btn-ghost w-full" id="pay-sms" type="button">Выслать код</button>
+          <button class="btn-primary w-full" id="pay-verify" type="button">Подтвердить</button>
+        </div>
+      </div>
+
+      <div id="account-step" class="mt-5 hidden space-y-4">
+        <p class="hint min-h-5" id="account-hint"></p>
+        <div class="modal-actions">
+          <button class="btn-primary hidden w-full" id="pay-confirm" type="button">Оплатить</button>
+          <button class="btn-soft hidden w-full" id="pay-trial" type="button">Включить пробный</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="app" class="hidden page-section">
+    <div class="monitor-sticky">
+      <div class="wrap monitor-bar">
+        <h1 id="title" class="monitor-title">Новые частные объявления</h1>
+        <div class="monitor-actions">
+          <span class="status text-xs text-muted sm:text-[13px]" id="status">ожидание поиска</span>
+          <button class="btn-ghost btn-sm" id="toggle-search" type="button">Скрыть</button>
+          <button class="btn-ghost btn-sm hidden sm:inline-flex" id="back-plans" type="button">Тарифы</button>
+          <button class="btn-ghost btn-sm" id="reset" type="button">Сбросить</button>
+        </div>
+      </div>
+
+      <div class="wrap" id="search-panel">
+        <div class="search-shell">
+          <form id="search-form" class="search-form" autocomplete="off">
+            <div class="search-field">
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="size-[18px]">
+                  <circle cx="11" cy="11" r="7"></circle>
+                  <path d="M20 20l-3.5-3.5"></path>
+                </svg>
+              </span>
+              <input id="query" type="search" placeholder="Поиск по объявлениям" />
+              <button class="find" id="find" type="submit">Найти</button>
+            </div>
+            <div class="region-wrap">
+              <button class="region-btn" id="region-btn" type="button">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="size-[18px] shrink-0">
+                  <path d="M12 2.2 4.8 19.6c-.2.5.3 1 .8.8l6.1-2.6 6.1 2.6c.5.2 1-.3.8-.8L12 2.2z"></path>
+                </svg>
+                <span id="region-label">Вся Россия</span>
+              </button>
+              <div class="region-pop" id="region-pop">
+                <input id="region-query" type="search" class="w-full border-0 border-b border-edge bg-ink px-3.5 py-3 text-[15px] text-body outline-none" placeholder="Город или регион" />
+                <div class="region-list" id="region-list"></div>
+              </div>
+            </div>
+          </form>
+
+          <div class="cat-row" id="cats"></div>
+
+          <div class="search-actions">
+            <button class="btn-primary" id="start" type="button">Начать поиск</button>
+            <button class="btn-stop" id="stop" type="button" disabled>Остановить</button>
           </div>
         </div>
-      </article>`;
-    }
+      </div>
+    </div>
 
-    function escapeHtml(text) {
-      return text.replace(/[&<>"']/g, (ch) => ({
-        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
-      }[ch]));
-    }
-
-    function mount(ad, fresh) {
-      if (seen.has(String(ad.id))) return null;
-      seen.add(String(ad.id));
-      const wrap = document.createElement("div");
-      wrap.innerHTML = cardHtml(ad);
-      const el = wrap.firstElementChild;
-      if (fresh) el.classList.add("fresh");
-      bindGallery(el);
-      return el;
-    }
-
-    function bindGallery(card) {
-      const box = card.querySelector(".gallery");
-      let images = [];
-      try { images = JSON.parse(decodeURIComponent(box.dataset.images || "%5B%5D")); } catch (e) { images = []; }
-      if (images.length < 2) return;
-      const img = box.querySelector("img");
-      let i = 0;
-      const show = () => { img.src = imgSrc(images[i]); img.dataset.i = String(i); };
-      box.querySelector(".prev")?.addEventListener("click", () => { i = (i - 1 + images.length) % images.length; show(); });
-      box.querySelector(".next")?.addEventListener("click", () => { i = (i + 1) % images.length; show(); });
-    }
-
-    function setStatus(text, live) {
-      statusEl.textContent = text;
-      statusEl.classList.toggle("live", live);
-    }
-
-    function addBatch(ads, fresh) {
-      if (!Array.isArray(ads) || !ads.length) {
-        if (!seen.size) setStatus("онлайн · жду объявления", true);
-        return;
-      }
-      const empty = feed.querySelector(".empty");
-      if (empty) empty.remove();
-      const marker = feed.firstChild;
-      ads.forEach((ad) => {
-        const el = mount(ad, fresh);
-        if (el) feed.insertBefore(el, marker);
-      });
-      setStatus("онлайн · " + seen.size + " объявл.", true);
-    }
-
-    function clearFeed() {
-      seen.clear();
-      feed.innerHTML = '<div class="empty">Жду объявления за последние 15 минут…</div>';
-      setStatus("онлайн · 0 объявл.", true);
-    }
-
-    document.getElementById("reset").addEventListener("click", async () => {
-      try {
-        await fetch("/api/reset", { method: "POST" });
-      } catch (e) {}
-      clearFeed();
-    });
-
-    function loadAds() {
-      return fetch("/api/ads")
-        .then((r) => r.json())
-        .then((ads) => addBatch(ads, false))
-        .catch(() => {});
-    }
-
-    loadAds();
-    setInterval(loadAds, 4000);
-
-    let offlineTimer = null;
-    const es = new EventSource("/events");
-    es.onopen = () => {
-      clearTimeout(offlineTimer);
-      setStatus("онлайн · " + seen.size + " объявл.", true);
-    };
-    es.onerror = () => {
-      clearTimeout(offlineTimer);
-      offlineTimer = setTimeout(() => {
-        if (es.readyState !== EventSource.OPEN) {
-          setStatus("переподключение…", false);
-        }
-      }, 4000);
-    };
-    es.onmessage = (ev) => {
-      try { addBatch(JSON.parse(ev.data), true); } catch (e) {}
-    };
-    es.addEventListener("reset", clearFeed);
-  </script>
+    <main id="feed" class="wrap feed">
+      <div class="empty">Задайте запрос и нажмите «Начать поиск»</div>
+    </main>
+  </div>
+
 </body>
 </html>
