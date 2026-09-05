@@ -1,6 +1,18 @@
 import { api } from "./api";
-import { escapeHtml, imgSrc } from "./format";
-import type { Ad, Category, Region } from "./types";
+import { openMessenger, itemWebUrl } from "./avito-links";
+import { ICON_CLOSE, ICON_EXT, ICON_MSG, ICON_PHONE, ICON_STAR, ICON_STAR_OUTLINE } from "./card-icons";
+import { isFavorite, toggleFavorite } from "./favorites";
+import { notifyNewAds } from "./push-notify";
+import { displayPrice, escapeHtml, imgSrc } from "./format";
+import {
+  addSellerToBlacklist,
+  BLACKLIST_EVENT,
+  loadSellerBlacklist,
+  sellerMatchesBlacklist,
+  syncSellerBlacklist,
+} from "./seller-blacklist";
+import { showToast, type ToastKind } from "./toast";
+import type { Ad, Category, Region, SearchMode } from "./types";
 
 const CACHE_KEY = "parser1.search";
 const PANEL_KEY = "parser1.searchPanel";
@@ -16,14 +28,16 @@ function input(id: string): HTMLInputElement {
   return $(id) as HTMLInputElement;
 }
 
-export function mountMonitor(): {
+export function mountMonitor(opts: {
+  isPushEnabled?: () => boolean;
+  onAvitoStatus?: (connected: boolean, label?: string) => void;
+} = {}): {
   show: () => void;
   hide: () => void;
+  openAvito: () => void;
 } {
   const app = $("app");
   const feed = $("feed");
-  const statusEl = $("status");
-  const avitoSessionEl = $("avito-session");
   const avitoModal = $("avito-modal");
   const avitoStatusLine = $("avito-status-line");
   const avitoHint = $("avito-hint");
@@ -33,41 +47,119 @@ export function mountMonitor(): {
   const avitoConnectedLabel = $("avito-connected-label");
   const avitoReset = $("avito-reset") as HTMLButtonElement;
   const avitoCookies = $("avito-cookies") as HTMLTextAreaElement;
-  const titleEl = $("title");
   const queryEl = input("query");
-  const regionBtn = $("region-btn");
+  const queryClearBtn = $("query-clear") as HTMLButtonElement;
+  const searchFieldWrap = $("search-field-wrap");
+  const searchSettingsBtn = $("search-settings-btn") as HTMLButtonElement;
+  const searchSettingsPop = $("search-settings-pop");
+  const searchSettingsCats = $("search-settings-cats");
+  const searchSettingsUrl = $("search-settings-url");
+  const saveUrlCheck = input("save-url");
+  const hideImagesCheck = input("hide-images");
+  const urlSavedFold = $("url-saved-fold");
+  const urlSavedFoldBtn = $("url-saved-fold-btn") as HTMLButtonElement;
+  const urlSavedPreview = $("url-saved-preview");
+  const savedUrlBox = $("saved-url-box");
+  const savedUrlLink = $("saved-url-link") as HTMLAnchorElement;
+  const searchFiltersUrl = $("search-filters-url") as HTMLAnchorElement;
+  const regionBtn = $("region-btn") as HTMLButtonElement;
   const regionLabel = $("region-label");
   const regionPop = $("region-pop");
   const regionQuery = input("region-query");
   const regionList = $("region-list");
+  const regionWrap = $("region-wrap");
+  const modeQueryBtn = $("mode-query") as HTMLButtonElement;
+  const modeUrlBtn = $("mode-url") as HTMLButtonElement;
   const searchPanel = $("search-panel");
+  const searchBody = $("search-body");
+  const searchFields = $("search-fields");
+  const searchActionsBlock = $("search-actions-block");
+  const searchActions = $("search-actions");
+  const searchFiltersLabel = $("search-filters-label");
   const toggleSearchBtn = $("toggle-search") as HTMLButtonElement;
   const startBtn = $("start") as HTMLButtonElement;
   const stopBtn = $("stop") as HTMLButtonElement;
-  const findBtn = $("find") as HTMLButtonElement;
   const catsEl = $("cats");
   const seen = new Set<string>();
   let region: Region = { slug: "all", name: "Вся Россия" };
   let category: Category = { id: "none", name: "Без категории" };
+  let searchMode: SearchMode = "query";
+  let savedSearchUrl = "";
+  let hideImages = false;
   let categories: Category[] = [
     { id: "none", name: "Без категории" },
     { id: "electronics", name: "Электроника" },
     { id: "phones", name: "Смартфоны" },
   ];
   let monitoring = false;
+  let searchBusy = false;
   let started = false;
   let events: EventSource | null = null;
   let avitoConnected = false;
   const phoneCache = new Map<string, string>();
 
+  const updateSettingsBtnState = () => {
+    const urlActive = searchMode === "url" && (saveUrlCheck.checked || Boolean(savedSearchUrl));
+    searchSettingsBtn.classList.toggle("active", category.id !== "none" || urlActive || hideImages);
+  };
+
+  const applyHideImages = () => {
+    feed.classList.toggle("no-images", hideImages);
+    feed.querySelectorAll<HTMLElement>(".card").forEach((card) => {
+      card.classList.toggle("card--no-media", hideImages);
+      card.querySelector(".card-media")?.classList.toggle("hidden", hideImages);
+    });
+  };
+
+  const setUrlSavedExpanded = (open: boolean) => {
+    savedUrlBox.classList.toggle("hidden", !open);
+    urlSavedFoldBtn.classList.toggle("open", open);
+    urlSavedFoldBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  };
+
+  const syncQueryClear = () => {
+    queryClearBtn.classList.toggle("hidden", !queryEl.value.trim());
+  };
+
+  const syncSearchControls = () => {
+    const locked = monitoring;
+    searchFields.classList.toggle("is-locked", locked);
+    queryEl.disabled = locked;
+    queryClearBtn.disabled = locked;
+    modeQueryBtn.disabled = locked;
+    modeUrlBtn.disabled = locked;
+    regionBtn.disabled = locked;
+    regionQuery.disabled = locked;
+    searchSettingsBtn.disabled = locked;
+    saveUrlCheck.disabled = locked;
+    hideImagesCheck.disabled = locked;
+    urlSavedFoldBtn.disabled = locked;
+    startBtn.disabled = searchBusy || locked;
+    stopBtn.disabled = searchBusy || !monitoring;
+    if (!searchBusy) {
+      startBtn.textContent = "Начать поиск";
+    }
+    catsEl.querySelectorAll("button.chip").forEach((btn) => {
+      (btn as HTMLButtonElement).disabled = locked;
+    });
+    regionList.querySelectorAll("button[data-slug]").forEach((btn) => {
+      (btn as HTMLButtonElement).disabled = locked;
+    });
+    if (locked) {
+      setSettingsOpen(false);
+      regionPop.classList.remove("open");
+    }
+  };
+
+  const setSettingsOpen = (open: boolean) => {
+    searchSettingsPop.classList.toggle("open", open);
+    searchSettingsBtn.classList.toggle("open", open);
+    searchSettingsBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  };
+
   const setAvitoSession = (connected: boolean, label = "") => {
     avitoConnected = connected;
-    avitoSessionEl.classList.toggle("on", connected);
-    avitoSessionEl.classList.toggle("off", !connected);
-    avitoSessionEl.textContent = connected ? `Avito: ${label || "вход"}` : "Avito: подключить";
-    avitoSessionEl.title = connected
-      ? "Аккаунт подключён"
-      : "Подключить Avito через Kiwi Browser";
+    opts.onAvitoStatus?.(connected, label);
   };
 
   const updateAvitoModal = (data: { connected?: boolean; label?: string; error?: string }) => {
@@ -116,7 +208,7 @@ export function mountMonitor(): {
 
   const requestPhone = async (ad: Ad, btn: HTMLButtonElement) => {
     if (!ad.can_call) {
-      window.open(ad.url, "_blank", "noopener");
+      window.open(itemWebUrl(ad), "_blank", "noopener");
       return;
     }
     const id = String(ad.id);
@@ -129,14 +221,17 @@ export function mountMonitor(): {
       openAvitoModal();
       return;
     }
-    const prev = btn.textContent;
+    const label = btn.querySelector("span");
+    const prev = label?.textContent || btn.textContent || "Позвонить";
     btn.disabled = true;
-    btn.textContent = "…";
+    if (label) label.textContent = "…";
+    else btn.textContent = "…";
     try {
       const result = await api.avitoPhone(id);
       if (result.ok && result.phone) {
         phoneCache.set(id, result.phone);
-        btn.textContent = result.phone;
+        if (label) label.textContent = result.phone;
+        else btn.textContent = result.phone;
         dialPhone(result.phone);
         return;
       }
@@ -147,10 +242,12 @@ export function mountMonitor(): {
       } else {
         window.alert(message);
       }
-      btn.textContent = prev || "Позвонить";
+      if (label) label.textContent = prev;
+      else btn.textContent = prev;
     } catch (err) {
       window.alert(err instanceof Error ? err.message : String(err));
-      btn.textContent = prev || "Позвонить";
+      if (label) label.textContent = prev;
+      else btn.textContent = prev;
     } finally {
       btn.disabled = false;
     }
@@ -161,7 +258,18 @@ export function mountMonitor(): {
       const data = JSON.parse(localStorage.getItem(CACHE_KEY) || "") as {
         region?: Region;
         category?: Category;
+        searchMode?: SearchMode;
+        savedSearchUrl?: string;
+        saveSearchUrl?: boolean;
+        hideImages?: boolean;
       };
+      if (data.searchMode === "query" || data.searchMode === "url") {
+        searchMode = data.searchMode;
+      }
+      savedSearchUrl = String(data.savedSearchUrl || "").trim();
+      saveUrlCheck.checked = data.saveSearchUrl !== false;
+      hideImages = data.hideImages === true;
+      hideImagesCheck.checked = hideImages;
       if (data.region?.slug && data.region.name) {
         region = { slug: String(data.region.slug), name: String(data.region.name) };
         regionLabel.textContent = region.name;
@@ -169,6 +277,8 @@ export function mountMonitor(): {
       if (data.category?.id && data.category.name) {
         category = { id: String(data.category.id), name: String(data.category.name) };
       }
+      updateSettingsBtnState();
+      applyHideImages();
     } catch {
       /* empty */
     }
@@ -176,132 +286,268 @@ export function mountMonitor(): {
 
   const saveCache = () => {
     try {
-      localStorage.setItem(CACHE_KEY, JSON.stringify({ region, category }));
+      localStorage.setItem(CACHE_KEY, JSON.stringify({
+        region,
+        category,
+        searchMode,
+        savedSearchUrl: saveUrlCheck.checked ? savedSearchUrl : "",
+        saveSearchUrl: saveUrlCheck.checked,
+        hideImages,
+      }));
     } catch {
       /* empty */
     }
   };
 
   const cardHtml = (ad: Ad): string => {
-    const images = ad.images || [];
-    const gallery = images.length
-      ? `<img src="${imgSrc(images[0])}" alt="" data-i="0" />
-         ${images.length > 1 ? `<button class="nav prev" type="button">‹</button><button class="nav next" type="button">›</button>` : ""}`
+    const id = String(ad.id);
+    const web = itemWebUrl(ad);
+    const fav = isFavorite(id);
+    const photo = ad.images?.[0];
+    const gallery = photo
+      ? `<img src="${imgSrc(photo)}" alt="" loading="lazy" />`
       : `<div class="ph">нет фото</div>`;
-    const imagesAttr = encodeURIComponent(JSON.stringify(images));
-    const sellerHtml = ad.seller ? `<div class="seller">${escapeHtml(ad.seller)}</div>` : "";
-    return `<article class="card${ad.can_call ? " callable" : ""}" data-id="${ad.id}">
-      <div class="gallery" data-images="${imagesAttr}">${gallery}</div>
-      <div class="body">
-        <div class="price">${escapeHtml(ad.price || "")}</div>
-        <div class="title">${escapeHtml(ad.title || "")}</div>
-        <div class="addr">${escapeHtml(ad.published ? ad.published + " · " : "")}${escapeHtml(ad.address || "")}</div>
-        ${sellerHtml}
-        <div class="tags">
-          <span class="tag ${ad.can_call ? "on" : "off"}">${ad.can_call ? "Звонок" : "Без звонка"}</span>
-          <span class="tag ${ad.can_message ? "on" : "off"}">${ad.can_message ? "Сообщение" : "Без сообщений"}</span>
+    const meta = [ad.published, ad.address].filter(Boolean).join(" · ");
+    const sellerHtml = ad.seller
+      ? `<div class="card-seller-row">
+          <span class="card-seller">Продавец: ${escapeHtml(ad.seller)}</span>
+          <button type="button" class="card-seller-block" data-action="block-seller" aria-label="В чёрный список" title="В чёрный список">
+            ${ICON_CLOSE}
+          </button>
+        </div>`
+      : "";
+    const mediaHtml = hideImages
+      ? ""
+      : `<a class="card-media" href="${escapeHtml(web)}" target="_blank" rel="noopener">
+        ${gallery}
+      </a>`;
+    return `<article class="card${fav ? " is-fav" : ""}${hideImages ? " card--no-media" : ""}" data-id="${id}"${ad.seller ? ` data-seller="${escapeHtml(ad.seller)}"` : ""}>
+      ${mediaHtml}
+      <div class="card-body">
+        <div class="card-price-block">
+          <div class="card-price">${escapeHtml(displayPrice(ad.price || "—"))}</div>
+          <button type="button" class="card-fav${fav ? " on" : ""}" data-action="fav" aria-label="${fav ? "Убрать из избранного" : "В избранное"}" title="${fav ? "Убрать из избранного" : "В избранное"}">
+            ${fav ? ICON_STAR : ICON_STAR_OUTLINE}
+          </button>
         </div>
-        <div class="actions">
-          <button class="call${ad.can_call ? "" : " muted"}" type="button" data-action="call">${ad.can_call ? "Позвонить" : "Открыть"}</button>
-          <a class="msg${ad.can_message ? "" : " muted"}" href="${ad.url}" target="_blank" rel="noopener">Написать</a>
-          <a class="open" href="${ad.url}" target="_blank" rel="noopener">Открыть</a>
+        <a class="card-title" href="${escapeHtml(web)}" target="_blank" rel="noopener">${escapeHtml(ad.title || "")}</a>
+        ${meta ? `<div class="card-meta">${escapeHtml(meta)}</div>` : ""}
+        ${sellerHtml}
+        <div class="card-actions">
+          <button class="card-btn call${ad.can_call ? "" : " muted"}" type="button" data-action="call">
+            ${ICON_PHONE}<span>${ad.can_call ? "Позвонить" : "Открыть"}</span>
+          </button>
+          <button class="card-btn msg${ad.can_message ? "" : " muted"}" type="button" data-action="msg" ${ad.can_message ? "" : "disabled"}>
+            ${ICON_MSG}<span>Написать</span>
+          </button>
+          <a class="card-btn ghost open" href="${escapeHtml(web)}" target="_blank" rel="noopener" title="Открыть на Avito">
+            ${ICON_EXT}<span class="sr-only">Открыть</span>
+          </a>
         </div>
       </div>
     </article>`;
   };
 
   const bindCardActions = (card: HTMLElement, ad: Ad) => {
+    const favBtn = card.querySelector('button[data-action="fav"]') as HTMLButtonElement | null;
+    favBtn?.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const on = toggleFavorite(ad.id);
+      card.classList.toggle("is-fav", on);
+      favBtn.classList.toggle("on", on);
+      favBtn.innerHTML = on ? ICON_STAR : ICON_STAR_OUTLINE;
+      favBtn.title = on ? "Убрать из избранного" : "В избранное";
+      favBtn.setAttribute("aria-label", favBtn.title);
+    });
+
     const callBtn = card.querySelector('button[data-action="call"]') as HTMLButtonElement | null;
-    if (!callBtn) return;
-    callBtn.addEventListener("click", (ev) => {
+    callBtn?.addEventListener("click", (ev) => {
       ev.preventDefault();
       void requestPhone(ad, callBtn);
     });
-  };
 
-  const bindGallery = (card: HTMLElement) => {
-    const box = card.querySelector(".gallery") as HTMLElement | null;
-    if (!box) return;
-    let images: string[] = [];
-    try {
-      images = JSON.parse(decodeURIComponent(box.dataset.images || "%5B%5D")) as string[];
-    } catch {
-      images = [];
-    }
-    if (images.length < 2) return;
-    const img = box.querySelector("img");
-    if (!img) return;
-    let i = 0;
-    const show = () => {
-      img.src = imgSrc(images[i]);
-      img.dataset.i = String(i);
-    };
-    box.querySelector(".prev")?.addEventListener("click", () => {
-      i = (i - 1 + images.length) % images.length;
-      show();
+    const msgBtn = card.querySelector('button[data-action="msg"]') as HTMLButtonElement | null;
+    msgBtn?.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      if (!ad.can_message) {
+        window.open(itemWebUrl(ad), "_blank", "noopener");
+        return;
+      }
+      openMessenger(ad);
     });
-    box.querySelector(".next")?.addEventListener("click", () => {
-      i = (i + 1) % images.length;
-      show();
+
+    const blockBtn = card.querySelector('button[data-action="block-seller"]') as HTMLButtonElement | null;
+    blockBtn?.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (!ad.seller) return;
+      if (addSellerToBlacklist(ad.seller)) {
+        void syncSellerBlacklist();
+        purgeBlacklistedSellers();
+        showToast(`«${ad.seller}» в чёрном списке`, "success");
+      }
     });
   };
 
-  const setStatus = (text: string, live: boolean) => {
-    statusEl.textContent = text;
-    statusEl.classList.toggle("live", live);
+  const setStatus = (text: string, live: boolean, kind: ToastKind = "info") => {
+    if (!text || live) return;
+    showToast(text, kind);
   };
 
   const mount = (ad: Ad, fresh: boolean): HTMLElement | null => {
     const id = String(ad.id);
     if (seen.has(id)) return null;
+    if (ad.seller && sellerMatchesBlacklist(ad.seller)) {
+      seen.add(id);
+      return null;
+    }
     seen.add(id);
     const wrap = document.createElement("div");
     wrap.innerHTML = cardHtml(ad);
     const el = wrap.firstElementChild as HTMLElement;
     if (fresh) el.classList.add("fresh");
-    bindGallery(el);
     bindCardActions(el, ad);
     return el;
+  };
+
+  const syncFeedEmpty = () => {
+    feed.classList.toggle("feed-empty", seen.size === 0);
+  };
+
+  const purgeBlacklistedSellers = () => {
+    feed.querySelectorAll<HTMLElement>(".card").forEach((card) => {
+      const seller = card.dataset.seller || "";
+      if (!seller || !sellerMatchesBlacklist(seller)) return;
+      const id = card.dataset.id;
+      if (id) seen.delete(id);
+      card.remove();
+    });
+    syncFeedEmpty();
   };
 
   const addBatch = (ads: Ad[], fresh: boolean) => {
     if (!Array.isArray(ads) || !ads.length) {
       if (monitoring && !seen.size) setStatus("жду объявления", true);
+      syncFeedEmpty();
       return;
     }
     feed.querySelector(".empty")?.remove();
     const marker = feed.firstChild;
+    const freshAds: Ad[] = [];
     ads.forEach((ad) => {
       const el = mount(ad, fresh);
-      if (el) feed.insertBefore(el, marker);
+      if (el) {
+        feed.insertBefore(el, marker);
+        if (fresh) freshAds.push(ad);
+      }
     });
+    if (fresh && freshAds.length && opts.isPushEnabled?.()) {
+      notifyNewAds(freshAds);
+    }
+    syncFeedEmpty();
     setStatus("онлайн · " + seen.size, true);
   };
 
   const clearFeed = (message?: string) => {
     seen.clear();
     feed.innerHTML = `<div class="empty">${message || "Жду новые объявления…"}</div>`;
+    syncFeedEmpty();
     if (monitoring) setStatus("онлайн · 0", true);
   };
 
   const setBusy = (busy: boolean) => {
-    startBtn.disabled = busy;
-    findBtn.disabled = busy;
-    stopBtn.disabled = busy || !monitoring;
-    startBtn.textContent = busy ? "Запускаю…" : "Начать поиск";
+    searchBusy = busy;
+    if (busy) {
+      startBtn.textContent = "Запускаю…";
+    }
+    syncSearchControls();
+  };
+
+  const shortUrl = (url: string, max = 56): string => {
+    if (url.length <= max) return url;
+    return `${url.slice(0, max - 1)}…`;
+  };
+
+  const applySavedUrl = () => {
+    const has = Boolean(savedSearchUrl) && saveUrlCheck.checked;
+    urlSavedFold.classList.toggle("hidden", !has);
+    if (!has) {
+      setUrlSavedExpanded(false);
+      updateCollapsedUrlHint();
+      return;
+    }
+    savedUrlLink.href = savedSearchUrl;
+    savedUrlLink.textContent = savedSearchUrl;
+    savedUrlLink.title = savedSearchUrl;
+    urlSavedPreview.textContent = shortUrl(savedSearchUrl, 42);
+    updateCollapsedUrlHint();
+  };
+
+  const updateCollapsedUrlHint = () => {
+    const collapsed = searchFields.classList.contains("hidden");
+    const show = collapsed && searchMode === "url" && Boolean(savedSearchUrl);
+    searchFiltersUrl.classList.toggle("hidden", !show);
+    if (!show) {
+      searchFiltersUrl.textContent = "";
+      searchFiltersUrl.removeAttribute("href");
+      return;
+    }
+    searchFiltersUrl.href = savedSearchUrl;
+    searchFiltersUrl.textContent = shortUrl(savedSearchUrl);
+    searchFiltersUrl.title = savedSearchUrl;
+  };
+
+  const updateUrlOptions = () => {
+    if (searchMode === "url" && savedSearchUrl && saveUrlCheck.checked && !queryEl.value.trim()) {
+      queryEl.value = savedSearchUrl;
+    }
+    syncQueryClear();
+    applySavedUrl();
+  };
+
+  const persistSavedUrl = (url: string) => {
+    if (searchMode !== "url" || !saveUrlCheck.checked) {
+      if (!saveUrlCheck.checked) {
+        savedSearchUrl = "";
+        applySavedUrl();
+        saveCache();
+      }
+      return;
+    }
+    savedSearchUrl = url;
+    applySavedUrl();
+    saveCache();
+  };
+
+  const setSearchMode = (mode: SearchMode) => {
+    searchMode = mode;
+    modeQueryBtn.classList.toggle("active", mode === "query");
+    modeUrlBtn.classList.toggle("active", mode === "url");
+    regionWrap.classList.toggle("hidden", mode === "url");
+    searchSettingsCats.classList.toggle("hidden", mode === "url");
+    searchSettingsUrl.classList.toggle("hidden", mode !== "url");
+    if (mode !== "url") setUrlSavedExpanded(false);
+    queryEl.placeholder = mode === "url"
+      ? "https://www.avito.ru/..."
+      : "Поиск по объявлениям";
+    queryEl.type = "search";
+    if (mode === "url") {
+      queryEl.setAttribute("inputmode", "url");
+      queryEl.setAttribute("autocomplete", "url");
+    } else {
+      queryEl.removeAttribute("inputmode");
+      queryEl.setAttribute("autocomplete", "off");
+    }
+    syncQueryClear();
+    updateUrlOptions();
+    updateSettingsBtnState();
+    saveCache();
   };
 
   const setMonitoring = (on: boolean) => {
     monitoring = on;
-    stopBtn.disabled = !on;
-  };
-
-  const updateTitle = () => {
-    const q = queryEl.value.trim();
-    const cat = category.id === "none" ? "" : " · " + category.name;
-    titleEl.textContent = q
-      ? `${q} · ${region.name}${cat}`
-      : `Новые частные · ${region.name}${cat}`;
+    syncSearchControls();
   };
 
   const renderCats = (items?: Category[]) => {
@@ -311,11 +557,20 @@ export function mountMonitor(): {
         <span class="mark">${CHECK}</span>${escapeHtml(item.name)}
       </button>`
     )).join("");
+    updateSettingsBtnState();
+    syncSearchControls();
   };
 
   const setSearchPanelVisible = (visible: boolean) => {
-    searchPanel.classList.toggle("hidden", !visible);
-    toggleSearchBtn.textContent = visible ? "Скрыть" : "Показать";
+    searchFields.classList.toggle("hidden", !visible);
+    searchActions.classList.toggle("hidden", !visible);
+    searchActionsBlock.classList.toggle("is-collapsed", !visible);
+    searchFiltersLabel.classList.toggle("hidden", visible);
+    searchBody.classList.toggle("is-collapsed", !visible);
+    updateCollapsedUrlHint();
+    toggleSearchBtn.classList.toggle("collapsed", !visible);
+    toggleSearchBtn.setAttribute("aria-label", visible ? "Скрыть фильтры" : "Показать фильтры");
+    toggleSearchBtn.title = visible ? "Скрыть фильтры" : "Показать фильтры";
     try {
       localStorage.setItem(PANEL_KEY, visible ? "open" : "closed");
     } catch {
@@ -331,10 +586,6 @@ export function mountMonitor(): {
     }
   };
 
-  const refreshPreview = () => {
-    updateTitle();
-  };
-
   const loadRegions = async (needle: string) => {
     const data = await api.regions(needle);
     if (!data.length) {
@@ -346,13 +597,39 @@ export function mountMonitor(): {
     )).join("");
   };
 
-  const startSearch = async (ev?: Event) => {
-    ev?.preventDefault();
+  const startSearch = async () => {
+    if (monitoring) {
+      setStatus("Сначала остановите текущий поиск", false, "error");
+      return;
+    }
+    const value = queryEl.value.trim();
+    if (!value) {
+      setStatus(searchMode === "url" ? "вставьте ссылку Avito" : "введите поисковый запрос", false, "error");
+      queryEl.focus();
+      return;
+    }
     setBusy(true);
     setStatus("готовлю поиск…", false);
     try {
-      const data = await api.startSearch(queryEl.value, region.slug, category.id);
+      const data = await api.startSearch(
+        searchMode === "url"
+          ? { mode: "url", url: value, seller_skip: loadSellerBlacklist() }
+          : {
+            mode: "query",
+            query: value,
+            region: region.slug,
+            category: category.id,
+            seller_skip: loadSellerBlacklist(),
+          },
+      );
       setMonitoring(true);
+      if (data.search_mode === "url" || data.search_mode === "query") {
+        setSearchMode(data.search_mode);
+      }
+      if (data.query) queryEl.value = data.query;
+      if (data.search_mode === "url") {
+        persistSavedUrl(data.query || value);
+      }
       if (data.region) {
         region = data.region;
         regionLabel.textContent = region.name;
@@ -362,11 +639,11 @@ export function mountMonitor(): {
         renderCats();
       }
       saveCache();
-      updateTitle();
       clearFeed();
+      setSearchPanelVisible(false);
       setStatus("поиск запущен", true);
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : String(err), false);
+      setStatus(err instanceof Error ? err.message : String(err), false, "error");
     } finally {
       setBusy(false);
     }
@@ -377,10 +654,10 @@ export function mountMonitor(): {
     try {
       await api.stopSearch();
       setMonitoring(false);
-      setStatus("остановлен", false);
+      setStatus("остановлен", false, "info");
     } catch (err) {
-      stopBtn.disabled = !monitoring;
-      setStatus(err instanceof Error ? err.message : String(err), false);
+      syncSearchControls();
+      setStatus(err instanceof Error ? err.message : String(err), false, "error");
     }
   };
 
@@ -404,19 +681,61 @@ export function mountMonitor(): {
   const boot = async () => {
     if (started) return;
     started = true;
+    void syncSellerBlacklist();
+    window.addEventListener(BLACKLIST_EVENT, () => purgeBlacklistedSellers());
     loadCache();
+    setSearchMode(searchMode);
     renderCats();
-    $("search-form").addEventListener("submit", (ev) => { void startSearch(ev); });
+    $("search-form").addEventListener("submit", (ev) => { ev.preventDefault(); });
+    queryEl.addEventListener("input", syncQueryClear);
+    queryClearBtn.addEventListener("click", () => {
+      if (monitoring) return;
+      queryEl.value = "";
+      syncQueryClear();
+      queryEl.focus();
+    });
     startBtn.addEventListener("click", () => { void startSearch(); });
+    modeQueryBtn.addEventListener("click", () => {
+      if (monitoring) return;
+      setSearchMode("query");
+    });
+    modeUrlBtn.addEventListener("click", () => {
+      if (monitoring) return;
+      setSearchMode("url");
+    });
     stopBtn.addEventListener("click", () => { void stopSearch(); });
     toggleSearchBtn.addEventListener("click", () => {
-      setSearchPanelVisible(searchPanel.classList.contains("hidden"));
+      setSearchPanelVisible(searchFields.classList.contains("hidden"));
     });
     loadSearchPanelState();
-    queryEl.addEventListener("input", refreshPreview);
+    hideImagesCheck.addEventListener("change", () => {
+      if (monitoring) return;
+      hideImages = hideImagesCheck.checked;
+      applyHideImages();
+      updateSettingsBtnState();
+      saveCache();
+    });
+    saveUrlCheck.addEventListener("change", () => {
+      if (monitoring) return;
+      updateSettingsBtnState();
+      if (!saveUrlCheck.checked) {
+        savedSearchUrl = "";
+        applySavedUrl();
+      } else {
+        const current = queryEl.value.trim();
+        if (current) persistSavedUrl(current);
+      }
+      saveCache();
+    });
+    urlSavedFoldBtn.addEventListener("click", () => {
+      if (monitoring) return;
+      setUrlSavedExpanded(savedUrlBox.classList.contains("hidden"));
+    });
     regionBtn.addEventListener("click", (ev) => {
+      if (monitoring) return;
       ev.stopPropagation();
-      const open = regionPop.classList.toggle("open");
+      const open = !regionPop.classList.contains("open");
+      regionPop.classList.toggle("open", open);
       if (open) {
         void loadRegions(regionQuery.value);
         regionQuery.focus();
@@ -424,14 +743,22 @@ export function mountMonitor(): {
     });
     regionQuery.addEventListener("input", () => { void loadRegions(regionQuery.value); });
     catsEl.addEventListener("click", (ev) => {
+      if (monitoring) return;
       const btn = (ev.target as HTMLElement).closest("button.chip") as HTMLButtonElement | null;
       if (!btn) return;
       category = { id: btn.dataset.id || "none", name: btn.dataset.name || "" };
       saveCache();
       renderCats();
-      refreshPreview();
+    });
+    searchSettingsBtn.addEventListener("click", (ev) => {
+      if (monitoring) return;
+      ev.stopPropagation();
+      const open = !searchSettingsPop.classList.contains("open");
+      setSettingsOpen(open);
+      if (open) regionPop.classList.remove("open");
     });
     regionList.addEventListener("click", (ev) => {
+      if (monitoring) return;
       const btn = (ev.target as HTMLElement).closest("button[data-slug]") as HTMLButtonElement | null;
       if (!btn) return;
       region = { slug: btn.dataset.slug || "all", name: btn.textContent || "" };
@@ -439,24 +766,20 @@ export function mountMonitor(): {
       regionPop.classList.remove("open");
       regionQuery.value = "";
       saveCache();
-      refreshPreview();
     });
     document.addEventListener("click", (ev) => {
       const target = ev.target as Node;
       if (!regionPop.contains(target) && target !== regionBtn && !regionBtn.contains(target)) {
         regionPop.classList.remove("open");
       }
-    });
-    $("reset").addEventListener("click", async () => {
-      try {
-        await api.reset();
-      } catch {
-        /* empty */
+      if (!searchSettingsPop.contains(target)
+        && target !== searchSettingsBtn
+        && !searchSettingsBtn.contains(target)
+        && !searchFieldWrap.contains(target)) {
+        setSettingsOpen(false);
       }
-      clearFeed();
     });
     void refreshAvitoSession();
-    avitoSessionEl.addEventListener("click", () => openAvitoModal());
     $("avito-close").addEventListener("click", () => closeAvitoModal());
     avitoModal.addEventListener("click", (ev) => {
       if (ev.target === avitoModal) closeAvitoModal();
@@ -491,7 +814,6 @@ export function mountMonitor(): {
       avitoImport.disabled = false;
     });
     void api.categories().then(renderCats).catch(() => undefined);
-    refreshPreview();
     connectEvents();
     setInterval(() => {
       if (monitoring) void api.ads().then((ads) => addBatch(ads, false)).catch(() => undefined);
@@ -499,7 +821,14 @@ export function mountMonitor(): {
     try {
       const data = await api.status();
       if (data.running) {
+        if (data.search_mode === "url" || data.search_mode === "query") {
+          setSearchMode(data.search_mode);
+        }
         if (data.query) queryEl.value = data.query;
+        if (data.search_mode === "url" && data.query) {
+          savedSearchUrl = saveUrlCheck.checked ? data.query : savedSearchUrl;
+          applySavedUrl();
+        }
         if (data.region?.slug) {
           region = data.region;
           regionLabel.textContent = region.name;
@@ -509,8 +838,8 @@ export function mountMonitor(): {
           renderCats();
         }
         saveCache();
-        updateTitle();
         setMonitoring(true);
+        setSearchPanelVisible(false);
         setStatus("поиск запущен", true);
         void api.ads().then((ads) => addBatch(ads, false));
       }
@@ -527,5 +856,6 @@ export function mountMonitor(): {
     hide() {
       app.classList.add("hidden");
     },
+    openAvito: openAvitoModal,
   };
 }

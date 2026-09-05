@@ -181,6 +181,8 @@ _state: dict = {
     "web_url": "",
     "api_url": "",
     "error": "",
+    "seller_skip": [],
+    "search_mode": "query",
 }
 
 
@@ -199,7 +201,27 @@ def snapshot() -> dict:
             "web_url": _state["web_url"],
             "api_url": _state["api_url"],
             "error": _state["error"],
+            "seller_skip": list(_state["seller_skip"]),
+            "search_mode": _state["search_mode"],
         }
+
+
+def set_seller_skip(sellers: list) -> dict:
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for item in sellers or []:
+        text = str(item).strip()
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(text)
+    with _lock:
+        _state["seller_skip"] = cleaned
+    _changed.set()
+    return snapshot()
 
 
 def find_category(category_id: str) -> dict:
@@ -288,8 +310,27 @@ def preview(query: str, region_slug: str, category_id: str = "") -> dict:
     }
 
 
-def start_search(query: str, region_slug: str, category_id: str = "") -> dict:
-    preview_data = preview(query, region_slug, category_id)
+def start_search(
+    query: str,
+    region_slug: str,
+    category_id: str = "",
+    seller_skip: list | None = None,
+    *,
+    mode: str = "query",
+    web_url: str = "",
+) -> dict:
+    if mode == "url":
+        link = (web_url or query).strip()
+        if not link:
+            raise ValueError("Укажите ссылку Avito")
+        preview_data = {
+            "query": link,
+            "region": dict(DEFAULT_REGION),
+            "category": {"id": "none", "name": "Без категории"},
+            "web_url": link,
+        }
+    else:
+        preview_data = preview(query, region_slug, category_id)
     web_url = preview_data["web_url"]
     logger.info(f"Преобразую web URL в API: {web_url}")
     api_url = convert_to_api_url(web_url)
@@ -297,12 +338,17 @@ def start_search(query: str, region_slug: str, category_id: str = "") -> dict:
     with _lock:
         _state["generation"] += 1
         _state["running"] = True
+        _state["search_mode"] = "url" if mode == "url" else "query"
         _state["query"] = preview_data["query"]
         _state["region"] = preview_data["region"]
         _state["category"] = preview_data["category"]
         _state["web_url"] = web_url
         _state["api_url"] = api_url
         _state["error"] = ""
+        if seller_skip is not None:
+            _state["seller_skip"] = [
+                str(item).strip() for item in seller_skip if str(item).strip()
+            ]
         generation = _state["generation"]
     _changed.set()
     return snapshot() | {"generation": generation}
@@ -347,4 +393,16 @@ def apply_runtime(cfg: dict, search: dict) -> dict:
     runtime["api_url"] = search["api_url"]
     runtime["title_must_contain"] = []
     runtime["title_skip"] = []
+    merged: list[str] = []
+    seen: set[str] = set()
+    for item in (cfg.get("seller_skip") or []) + (search.get("seller_skip") or []):
+        text = str(item).strip()
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(text)
+    runtime["seller_skip"] = merged
     return runtime

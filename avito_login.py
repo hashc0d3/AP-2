@@ -13,29 +13,18 @@ from typing import Any
 
 from loguru import logger
 
-from avito_connect import BrowserClosedError, PROFILE_DIR, STEALTH_JS, collect_session
+from avito_connect import BrowserClosedError, collect_session, _launch_context
 from avito_user import save_user_session, session_status
 from subscription import normalize_phone
 
 STATUS_PATH = Path("storage") / "avito_login.json"
-DESKTOP_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+MOBILE_UA = (
+    "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
 )
-LOGIN_URL = "https://www.avito.ru/#login?authsrc=h"
-IMPERSONATE = "chrome131"
+LOGIN_URL = "https://m.avito.ru/profile/login"
+IMPERSONATE = "chrome131_android"
 WAIT_COMMAND_SEC = 600
-_NOISE_HOSTS = (
-    "sentry",
-    "pixel",
-    "metric.js",
-    "adhigh",
-    "gonet-ads",
-    "simbad.pro",
-    "doubleclick",
-    "googlesyndication",
-    "mc.yandex",
-)
 
 
 def _mask_phone(phone: str) -> str:
@@ -243,42 +232,6 @@ def start_login() -> dict:
     return {"ok": True, "pid": proc.pid, **login_status()}
 
 
-def _should_block(url: str, resource_type: str) -> bool:
-    if resource_type in {"image", "media", "font"}:
-        return True
-    lower = url.lower()
-    return any(host in lower for host in _NOISE_HOSTS)
-
-
-def _launch_login_context(playwright):
-    PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-    context = playwright.chromium.launch_persistent_context(
-        user_data_dir=str(PROFILE_DIR.resolve()),
-        headless=False,
-        args=[
-            "--disable-blink-features=AutomationControlled",
-            "--no-first-run",
-            "--no-default-browser-check",
-        ],
-        ignore_default_args=["--enable-automation"],
-        user_agent=DESKTOP_UA,
-        locale="ru-RU",
-        viewport={"width": 1280, "height": 800},
-    )
-    context.add_init_script(STEALTH_JS)
-
-    def _route(route) -> None:
-        req = route.request
-        if _should_block(req.url, req.resource_type):
-            route.abort()
-        else:
-            route.continue_()
-
-    context.route("**/*", _route)
-    logger.info("Браузер: Chromium для SMS-входа (desktop)")
-    return context
-
-
 def _wait_pending(key: str, timeout: float = WAIT_COMMAND_SEC) -> str:
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -326,10 +279,9 @@ def _open_login(page) -> None:
         raise BrowserClosedError("Окно браузера закрыто")
     _write_status(step="browser")
     page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=90_000)
-    page.wait_for_timeout(3500)
+    page.wait_for_timeout(2500)
     title = (page.title() or "").lower()
-    body = (page.content() or "").lower()
-    if "доступ ограничен" in title or "too many requests" in body:
+    if "доступ ограничен" in title or "too many requests" in title:
         raise RuntimeError("Avito ограничил доступ с вашего IP — попробуйте позже или вставьте cookies")
     _click_text(page, [r"телефон", r"по номеру", r"войти", r"продолжить"])
 
@@ -366,28 +318,20 @@ def _fill_code(page, code: str) -> None:
     code_loc = _first_visible(
         page,
         [
-            'input[autocomplete="one-time-code"]',
-            'input[name*="code" i]',
-            'input[placeholder*="код" i]',
             'input[inputmode="numeric"]',
+            'input[name*="code" i]',
+            'input[autocomplete="one-time-code"]',
+            'input[placeholder*="код" i]',
             'input[type="tel"]',
         ],
         timeout=20_000,
     )
-    if code_loc:
-        code_loc.click(timeout=5000)
-        code_loc.fill(code)
-    else:
-        boxes = page.locator('input[inputmode="numeric"], input[type="tel"]').all()
-        visible = [box for box in boxes if box.is_visible()]
-        if len(visible) >= len(code):
-            for idx, digit in enumerate(code):
-                visible[idx].click(timeout=3000)
-                visible[idx].fill(digit)
-        else:
-            raise RuntimeError("Не найдено поле для SMS-кода")
+    if not code_loc:
+        raise RuntimeError("Не найдено поле для SMS-кода")
+    code_loc.click(timeout=5000)
+    code_loc.fill(code)
     if not _click_text(page, [r"подтвердить", r"войти", r"продолжить", r"готово"]):
-        page.keyboard.press("Enter")
+        code_loc.press("Enter")
     page.wait_for_timeout(3000)
 
 
@@ -419,7 +363,7 @@ def run_sms_login() -> None:
     )
 
     with sync_playwright() as playwright:
-        context = _launch_login_context(playwright)
+        context = _launch_context(playwright)
         page = context.pages[0] if context.pages else context.new_page()
         try:
             _open_login(page)
@@ -439,7 +383,7 @@ def run_sms_login() -> None:
             browser = context.browser
             for _ in range(45):
                 try:
-                    payload = collect_session(context, DESKTOP_UA, IMPERSONATE)
+                    payload = collect_session(context, MOBILE_UA, IMPERSONATE)
                 except Exception as err:
                     if "has been closed" in str(err).lower():
                         raise BrowserClosedError("Окно браузера закрыто") from err

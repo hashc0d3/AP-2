@@ -7,7 +7,7 @@ import sys
 from loguru import logger
 
 from avito_phone import fetch_phone
-from avito_user import fetch_user_phone, session_status
+from avito_user import build_user_client, fetch_user_phone, load_user_session, session_status
 from cookie_pool import buy_one, load_config, unblock_one, wait_ready_cookie
 from parser import build_client, change_ip
 

@@ -8,6 +8,10 @@ export function escapeHtml(text: string): string {
   }[ch] || ch));
 }
 
+export function displayPrice(price: string): string {
+  return price.replace(/[\u00a0\u202f\u2009]/g, " ").trim();
+}
+
 export function formatLeft(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
   const days = Math.floor(s / 86400);

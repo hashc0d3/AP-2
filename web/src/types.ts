@@ -6,6 +6,7 @@ export type AuthStatus = {
 
 export type Region = { slug: string; name: string };
 export type Category = { id: string; name: string };
+export type SearchMode = "query" | "url";
 
 export type Account = {
   id: string;
@@ -42,6 +43,7 @@ export type PromoQuote = {
 export type SearchState = {
   running: boolean;
   query: string;
+  search_mode?: SearchMode;
   region?: Region;
   category?: Category;
   web_url?: string;
@@ -70,6 +72,24 @@ export type AvitoPhoneResult = {
   phone?: string;
   error?: string;
   code?: string;
+};
+
+export type SpfaBalance = {
+  success?: boolean;
+  balance: number;
+  error?: string;
+};
+
+export type PriceBatchStatus = {
+  success?: boolean;
+  status?: string;
+  task_id?: string;
+  results?: unknown[];
+  price_per_ad?: string;
+  total_cost?: string;
+  billed?: boolean;
+  error?: string;
+  message?: string;
 };
 
 export type Ad = {

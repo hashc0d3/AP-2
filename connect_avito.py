@@ -6,7 +6,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from avito_connect import BrowserClosedError, _finish_connect, run_connect
+from avito_connect import _finish_connect, run_connect
 
 
 def main() -> None:
@@ -15,15 +15,11 @@ def main() -> None:
         _finish_connect(True)
     except Exception as err:
         logger.error(f"Avito connect: {err}")
-        message = str(err)
-        if isinstance(err, BrowserClosedError):
-            message = "Окно закрыто до входа — откройте снова и дождитесь загрузки"
-        _finish_connect(False, message)
+        _finish_connect(False, str(err))
         raise SystemExit(1) from err
 
 
 if __name__ == "__main__":
-    from log_setup import setup_file_log
-
-    setup_file_log("connect_avito.log")
+    Path("logs").mkdir(exist_ok=True)
+    logger.add("logs/connect_avito.log", rotation="2 MB", retention="3 days")
     main()

@@ -1,8 +1,23 @@
+import { initTheme } from "./theme";
 import { api } from "./api";
 import { mountMonitor } from "./monitor";
+import { mountUserMenu } from "./user-menu";
 import "./styles.css";
 
-const monitor = mountMonitor();
+initTheme();
+
+let monitorRef: ReturnType<typeof mountMonitor> | null = null;
+
+const userMenu = mountUserMenu({
+  onAvitoClick: () => monitorRef?.openAvito(),
+});
+
+const monitor = mountMonitor({
+  isPushEnabled: () => userMenu.isPushEnabled(),
+  onAvitoStatus: (connected, label) => userMenu.setAvitoStatus(connected, label),
+});
+monitorRef = monitor;
+
 const app = document.getElementById("app") as HTMLElement;
 const authModal = document.getElementById("auth-modal") as HTMLElement;
 const authLogin = document.getElementById("auth-login") as HTMLInputElement;
@@ -10,11 +25,13 @@ const authPassword = document.getElementById("auth-password") as HTMLInputElemen
 const authSubmit = document.getElementById("auth-submit") as HTMLButtonElement;
 const authHint = document.getElementById("auth-hint") as HTMLElement;
 const authBtn = document.getElementById("auth-btn") as HTMLButtonElement;
-const shellBadge = document.getElementById("shell-badge") as HTMLElement;
+const shellUser = document.getElementById("shell-user") as HTMLElement;
 
 function showAuth(): void {
   authModal.classList.remove("hidden");
   app.classList.add("hidden");
+  shellUser.classList.add("hidden");
+  userMenu.close();
   authHint.textContent = "";
   authPassword.value = "";
 }
@@ -22,8 +39,8 @@ function showAuth(): void {
 function showApp(username: string): void {
   authModal.classList.add("hidden");
   app.classList.remove("hidden");
-  shellBadge.textContent = username;
-  shellBadge.classList.remove("hidden");
+  userMenu.setUsername(username);
+  shellUser.classList.remove("hidden");
   authBtn.textContent = "Выйти";
   monitor.show();
 }
@@ -44,7 +61,7 @@ authSubmit.addEventListener("click", () => {
 authBtn.addEventListener("click", () => {
   void api.logout().then(() => {
     authBtn.textContent = "Войти";
-    shellBadge.classList.add("hidden");
+    shellUser.classList.add("hidden");
     app.classList.add("hidden");
     showAuth();
   });

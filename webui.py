@@ -13,10 +13,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from avito_search import list_categories, preview, search_regions, snapshot, start_search, stop_search
+from avito_search import list_categories, preview, search_regions, set_seller_skip, snapshot, start_search, stop_search
 from avito_connect import connect_status, reset_connect, start_connect
 from avito_login import login_status, queue_code, queue_phone, reset_login
 from avito_user import clear_user_session, fetch_user_phone, normalize_import, save_user_session, session_status
+from spfa_price import batch_lookup_status, fetch_balance, start_batch_lookup
 from app_auth import auth_status, is_authenticated, login as app_login, logout as app_logout
 
 _DISCONNECT = (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, TimeoutError)
@@ -229,6 +230,42 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json(200, login_status())
             return
+        if parsed.path == "/api/price/batch":
+            if not self._require_sub():
+                return
+            task_id = (parse_qs(parsed.query).get("task_id") or [""])[0].strip()
+            if not task_id:
+                self._json(400, {"error": "Укажите task_id"})
+                return
+            try:
+                data = batch_lookup_status(task_id)
+            except ValueError as err:
+                self._json(400, {"error": str(err)})
+                return
+            except RuntimeError as err:
+                self._json(502, {"error": str(err)})
+                return
+            self._json(200, data)
+            return
+        if parsed.path == "/api/spfa/balance":
+            if not self._require_sub():
+                return
+            try:
+                data = fetch_balance()
+            except ValueError as err:
+                self._json(400, {"error": str(err)})
+                return
+            except RuntimeError as err:
+                logger.warning(f"SPFA balance: {err}")
+                self._json(502, {"error": str(err)})
+                return
+            self._json(200, data)
+            return
+        if parsed.path == "/api/seller-blacklist":
+            if not self._require_sub():
+                return
+            self._json(200, {"sellers": snapshot().get("seller_skip") or []})
+            return
         if parsed.path == "/img":
             url = (parse_qs(parsed.query).get("u") or [""])[0]
             if not url or not _allowed_image(url):
@@ -350,6 +387,21 @@ class Handler(BaseHTTPRequestHandler):
             count = clear_ads()
             self._json(200, {"ok": True, "cleared": count})
             return
+        if parsed.path == "/api/seller-blacklist":
+            if not self._require_sub():
+                return
+            try:
+                payload = self._read_json()
+            except ValueError:
+                self._json(400, {"error": "Некорректный JSON"})
+                return
+            sellers = payload.get("sellers")
+            if not isinstance(sellers, list):
+                self._json(400, {"error": "Укажите sellers"})
+                return
+            data = set_seller_skip(sellers)
+            self._json(200, {"ok": True, "sellers": data.get("seller_skip") or []})
+            return
         if parsed.path == "/api/search":
             if not self._require_sub():
                 return
@@ -361,8 +413,22 @@ class Handler(BaseHTTPRequestHandler):
             query = str(payload.get("query") or "")
             region = str(payload.get("region") or payload.get("slug") or "")
             category = str(payload.get("category") or "")
+            mode = str(payload.get("mode") or "query")
+            url = str(payload.get("url") or "")
+            seller_skip = payload.get("seller_skip")
+            if seller_skip is not None and not isinstance(seller_skip, list):
+                seller_skip = []
             try:
-                data = start_search(query, region, category)
+                if mode == "url":
+                    data = start_search(
+                        "",
+                        "",
+                        seller_skip=seller_skip,
+                        mode="url",
+                        web_url=url or query,
+                    )
+                else:
+                    data = start_search(query, region, category, seller_skip=seller_skip, mode="query")
             except ValueError as err:
                 self._json(400, {"error": str(err)})
                 return
@@ -455,6 +521,30 @@ class Handler(BaseHTTPRequestHandler):
             if not self._require_sub():
                 return
             self._json(200, reset_login())
+            return
+        if parsed.path == "/api/price/batch":
+            if not self._require_sub():
+                return
+            try:
+                payload = self._read_json()
+            except ValueError:
+                self._json(400, {"error": "Некорректный JSON"})
+                return
+            queries = payload.get("queries") or payload.get("ads") or []
+            if not isinstance(queries, list):
+                self._json(400, {"error": "queries должен быть массивом"})
+                return
+            region = str(payload.get("region") or "all")
+            try:
+                data = start_batch_lookup([str(item) for item in queries], region)
+            except ValueError as err:
+                self._json(400, {"error": str(err)})
+                return
+            except RuntimeError as err:
+                logger.warning(f"SPFA batch_lookup: {err}")
+                self._json(502, {"error": str(err)})
+                return
+            self._json(200, data)
             return
         self.send_error(404)
 
