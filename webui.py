@@ -17,16 +17,7 @@ from avito_search import list_categories, preview, search_regions, snapshot, sta
 from avito_connect import connect_status, reset_connect, start_connect
 from avito_login import login_status, queue_code, queue_phone, reset_login
 from avito_user import clear_user_session, fetch_user_phone, normalize_import, save_user_session, session_status
-from subscription import (
-    activate_trial,
-    is_active,
-    logout,
-    public_status,
-    quote_promo,
-    send_sms,
-    verify_phone,
-    pay as pay_subscription,
-)
+from app_auth import auth_status, is_authenticated, login as app_login, logout as app_logout
 
 _DISCONNECT = (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, TimeoutError)
 
@@ -147,9 +138,9 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, body, "application/json; charset=utf-8")
 
     def _require_sub(self) -> bool:
-        if is_active():
+        if is_authenticated():
             return True
-        self._json(403, {"error": "Нет активной подписки", "code": "no_subscription"})
+        self._json(403, {"error": "Требуется вход", "code": "auth_required"})
         return False
 
     def _serve_static(self, rel: str) -> bool:
@@ -192,7 +183,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(404)
             return
         if parsed.path == "/api/billing/status":
-            self._json(200, public_status())
+            self._json(200, auth_status())
             return
         if parsed.path == "/api/ads":
             if not self._require_sub():
@@ -221,7 +212,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, body, "application/json; charset=utf-8")
             return
         if parsed.path == "/api/status":
-            self._json(200, snapshot() | {"subscription": public_status()})
+            self._json(200, snapshot() | {"subscription": auth_status()})
             return
         if parsed.path == "/api/avito/session":
             if not self._require_sub():
@@ -273,8 +264,8 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             return
         if parsed.path == "/events":
-            if not is_active():
-                self._json(403, {"error": "Нет активной подписки", "code": "no_subscription"})
+            if not is_authenticated():
+                self._json(403, {"error": "Требуется вход", "code": "auth_required"})
                 return
             self.close_connection = True
             self.send_response(200)
@@ -329,46 +320,29 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path == "/api/billing/sms":
+            self._json(404, {"error": "Недоступно"})
+            return
+        if parsed.path == "/api/auth/login":
             try:
                 payload = self._read_json()
-                self._json(200, send_sms(str(payload.get("phone") or "")))
+                self._json(200, app_login(str(payload.get("login") or payload.get("username") or ""), str(payload.get("password") or "")))
             except ValueError as err:
                 self._json(400, {"error": str(err)})
             return
         if parsed.path == "/api/auth/verify":
-            try:
-                payload = self._read_json()
-                self._json(200, verify_phone(str(payload.get("phone") or ""), str(payload.get("code") or "")))
-            except ValueError as err:
-                self._json(400, {"error": str(err)})
+            self._json(404, {"error": "Недоступно"})
             return
         if parsed.path == "/api/auth/logout":
-            self._json(200, logout())
+            self._json(200, app_logout())
             return
         if parsed.path == "/api/billing/promo":
-            try:
-                payload = self._read_json()
-                self._json(200, quote_promo(str(payload.get("code") or "")))
-            except ValueError as err:
-                self._json(400, {"error": str(err)})
+            self._json(404, {"error": "Недоступно"})
             return
         if parsed.path == "/api/billing/trial":
-            try:
-                self._json(200, activate_trial())
-            except ValueError as err:
-                self._json(400, {"error": str(err)})
+            self._json(404, {"error": "Недоступно"})
             return
         if parsed.path == "/api/billing/pay":
-            try:
-                payload = self._read_json()
-                data = pay_subscription(
-                    promo=str(payload.get("promo") or ""),
-                    phone=str(payload.get("phone") or ""),
-                    code=str(payload.get("code") or ""),
-                )
-                self._json(200, data)
-            except ValueError as err:
-                self._json(400, {"error": str(err)})
+            self._json(404, {"error": "Недоступно"})
             return
         if parsed.path == "/api/reset":
             if not self._require_sub():

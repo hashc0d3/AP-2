@@ -59,8 +59,9 @@ def _write_pid() -> None:
 
 
 def run_loop() -> None:
-    Path("logs").mkdir(exist_ok=True)
-    logger.add("logs/cookies.log", rotation="1 MB", retention="3 days")
+    from log_setup import setup_file_log
+
+    setup_file_log("cookies.log")
     cfg = load_config()
     pause = max(30, int(cfg.get("cookie_unblock_pause") or 60))
     _write_pid()

@@ -1,3 +1,9 @@
+export type AuthStatus = {
+  logged_in: boolean;
+  username: string;
+  active: boolean;
+};
+
 export type Region = { slug: string; name: string };
 export type Category = { id: string; name: string };
 
@@ -41,7 +47,7 @@ export type SearchState = {
   web_url?: string;
   api_url?: string;
   error?: string;
-  subscription?: BillingStatus;
+  subscription?: AuthStatus;
 };
 
 export type AvitoConnectStatus = {

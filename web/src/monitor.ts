@@ -1,6 +1,6 @@
 import { api } from "./api";
 import { escapeHtml, imgSrc } from "./format";
-import type { Ad, BillingStatus, Category, Region } from "./types";
+import type { Ad, Category, Region } from "./types";
 
 const CACHE_KEY = "parser1.search";
 const PANEL_KEY = "parser1.searchPanel";
@@ -17,7 +17,7 @@ function input(id: string): HTMLInputElement {
 }
 
 export function mountMonitor(): {
-  show: (status: BillingStatus) => void;
+  show: () => void;
   hide: () => void;
 } {
   const app = $("app");
@@ -520,7 +520,7 @@ export function mountMonitor(): {
   };
 
   return {
-    show(_status: BillingStatus) {
+    show() {
       app.classList.remove("hidden");
       void boot();
     },

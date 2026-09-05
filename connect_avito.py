@@ -23,6 +23,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    Path("logs").mkdir(exist_ok=True)
-    logger.add("logs/connect_avito.log", rotation="2 MB", retention="3 days")
+    from log_setup import setup_file_log
+
+    setup_file_log("connect_avito.log")
     main()

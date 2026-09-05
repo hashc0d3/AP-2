@@ -1,109 +1,64 @@
 import { api } from "./api";
-import { formatLeft } from "./format";
-import { mountLanding } from "./landing";
 import { mountMonitor } from "./monitor";
-import type { BillingStatus } from "./types";
 import "./styles.css";
 
-type View = "plans" | "monitor";
-
-const landing = mountLanding({
-  onStatus: (status) => apply(status),
-  onActivated: (status) => {
-    apply(status);
-    if (status.active) openView("monitor");
-  },
-});
 const monitor = mountMonitor();
-const tabPlans = document.getElementById("tab-plans") as HTMLButtonElement;
-const tabMonitor = document.getElementById("tab-monitor") as HTMLButtonElement;
-const toMonitor = document.getElementById("to-monitor") as HTMLButtonElement;
-const backPlans = document.getElementById("back-plans") as HTMLButtonElement;
+const app = document.getElementById("app") as HTMLElement;
+const authModal = document.getElementById("auth-modal") as HTMLElement;
+const authLogin = document.getElementById("auth-login") as HTMLInputElement;
+const authPassword = document.getElementById("auth-password") as HTMLInputElement;
+const authSubmit = document.getElementById("auth-submit") as HTMLButtonElement;
+const authHint = document.getElementById("auth-hint") as HTMLElement;
 const authBtn = document.getElementById("auth-btn") as HTMLButtonElement;
 const shellBadge = document.getElementById("shell-badge") as HTMLElement;
-let billing: BillingStatus | null = null;
-let view: View = "plans";
 
-function emptyStatus(): BillingStatus {
-  return {
-    logged_in: false,
-    account: null,
-    active: false,
-    plan: "none",
-    trial_used: false,
-    trial_available: false,
-    expires_at: 0,
-    seconds_left: 0,
-    phone: "",
-    price: 3000,
-    currency: "RUB",
-    paid_days: 30,
-    trial_hours: 24,
-  };
+function showAuth(): void {
+  authModal.classList.remove("hidden");
+  app.classList.add("hidden");
+  authHint.textContent = "";
+  authPassword.value = "";
 }
 
-function setBadge(status: BillingStatus): void {
-  if (status.logged_in && status.account) {
-    const plan = status.active ? formatLeft(status.seconds_left) : "без подписки";
-    shellBadge.textContent = `${status.account.phone_label} · ${plan}`;
-  } else {
-    shellBadge.textContent = "Нет аккаунта";
-  }
-  authBtn.textContent = status.logged_in ? "Выйти" : "Войти";
-  toMonitor.classList.toggle("hidden", !status.active || view === "monitor");
+function showApp(username: string): void {
+  authModal.classList.add("hidden");
+  app.classList.remove("hidden");
+  shellBadge.textContent = username;
+  shellBadge.classList.remove("hidden");
+  authBtn.textContent = "Выйти";
+  monitor.show();
 }
 
-function openView(next: View): void {
-  if (next === "monitor" && !billing?.active) {
-    view = "plans";
-    landing.show();
-    monitor.hide();
-    document.getElementById("plans")?.scrollIntoView({ behavior: "smooth" });
-    shellBadge.textContent = billing?.logged_in ? "Нужна подписка" : "Войдите и оформите тариф";
-    tabPlans.classList.add("active");
-    tabMonitor.classList.remove("active");
-    return;
-  }
-  view = next;
-  const onMonitor = next === "monitor";
-  if (onMonitor) {
-    landing.hide();
-    if (billing) monitor.show(billing);
-  } else {
-    landing.show();
-    monitor.hide();
-  }
-  tabPlans.classList.toggle("active", !onMonitor);
-  tabMonitor.classList.toggle("active", onMonitor);
-  toMonitor.classList.toggle("hidden", !billing?.active || onMonitor);
-}
-
-function apply(status: BillingStatus): void {
-  billing = status;
-  landing.render(status);
-  setBadge(status);
-  if (view === "monitor") openView(status.active ? "monitor" : "plans");
-}
-
-tabPlans.addEventListener("click", () => openView("plans"));
-tabMonitor.addEventListener("click", () => openView("monitor"));
-toMonitor.addEventListener("click", () => openView("monitor"));
-backPlans.addEventListener("click", () => openView("plans"));
-authBtn.addEventListener("click", () => {
-  if (billing?.logged_in) {
-    void api.logout().then((status) => {
-      apply(status);
-      openView("plans");
+authSubmit.addEventListener("click", () => {
+  authSubmit.disabled = true;
+  authHint.textContent = "";
+  void api.login(authLogin.value, authPassword.value)
+    .then((status) => showApp(status.username || "sotik77"))
+    .catch((err) => {
+      authHint.textContent = err instanceof Error ? err.message : String(err);
+    })
+    .finally(() => {
+      authSubmit.disabled = false;
     });
-    return;
-  }
-  landing.openAuth("login");
 });
 
-void api.billing().then((status) => {
-  apply(status);
-  openView(status.active ? "monitor" : "plans");
-}).catch(() => {
-  apply(emptyStatus());
-  openView("plans");
+authBtn.addEventListener("click", () => {
+  void api.logout().then(() => {
+    authBtn.textContent = "Войти";
+    shellBadge.classList.add("hidden");
+    app.classList.add("hidden");
+    showAuth();
+  });
 });
+
+document.getElementById("auth-form")?.addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  authSubmit.click();
+});
+
+void api.authStatus().then((status) => {
+  if (status.logged_in) {
+    showApp(status.username || "sotik77");
+  } else {
+    showAuth();
+  }
+}).catch(() => showAuth());

@@ -3,121 +3,39 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Сигнал — новые объявления Avito</title>
-  <script type="module" crossorigin src="/assets/index-CdIKgfrs.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-B2nWPplW.css">
+  <title>Сигнал — мониторинг Avito</title>
+  <script type="module" crossorigin src="/assets/index-D0FK9JmD.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-DYIRNt9b.css">
 </head>
 <body>
   <header class="sticky top-0 z-30 border-b border-edge bg-ink/90 backdrop-blur-md">
     <div class="wrap shell-header">
       <div class="shell-logo">Сигнал<span class="text-brand">.</span></div>
-      <nav class="shell-nav" aria-label="Разделы">
-        <button type="button" id="tab-plans" class="tab">Тарифы</button>
-        <button type="button" id="tab-monitor" class="tab">Мониторинг</button>
-      </nav>
       <div class="shell-actions">
         <span id="shell-badge" class="hidden max-w-[11rem] truncate rounded-full border border-edge px-2.5 py-1 text-[11px] text-blue-300 sm:inline-block sm:max-w-none sm:px-3 sm:py-1.5 sm:text-xs">
-          Нет аккаунта
+          …
         </span>
-        <button class="btn-ghost btn-sm hidden" id="to-monitor" type="button">К ленте</button>
         <button class="btn-ghost btn-sm" id="auth-btn" type="button">Войти</button>
       </div>
     </div>
   </header>
 
-  <section id="landing" class="page-section">
-    <div class="wrap hero-block">
-      <h1 class="max-w-2xl text-[1.75rem] leading-[1.12] font-bold tracking-tight sm:text-4xl sm:leading-[1.1] md:text-5xl">
-        Новые объявления Avito за 60–90 секунд
-      </h1>
-      <p class="mt-3 max-w-xl text-base leading-relaxed text-muted sm:mt-4 sm:text-lg">
-        Живая лента частных объявлений. Регион, категория, запрос.
-      </p>
-      <div class="hero-actions">
-        <button class="btn-primary w-full" id="hero-pay" type="button">Подписка 3 000 ₽</button>
-        <button class="btn-soft w-full" id="hero-trial" type="button">Пробный день</button>
-      </div>
-    </div>
-
-    <div class="wrap feature-row">
-      <article class="panel">
-        <h3 class="text-base font-semibold">Только свежие</h3>
-        <p class="mt-2 hint">Объявления за последние минуты. Продвинутые скрыты.</p>
-      </article>
-      <article class="panel">
-        <h3 class="text-base font-semibold">Москва и регионы</h3>
-        <p class="mt-2 hint">Город и категория как на Avito.</p>
-      </article>
-      <article class="panel">
-        <h3 class="text-base font-semibold">Контакты сразу</h3>
-        <p class="mt-2 hint">Видно, доступны звонок и сообщение.</p>
-      </article>
-    </div>
-
-    <div class="wrap plans-row" id="plans">
-      <article class="panel flex flex-col">
-        <h3 class="text-base font-semibold">Пробный</h3>
-        <div class="mt-4 text-4xl font-bold tracking-tight">
-          0 ₽ <span class="text-base font-semibold text-muted">/ 24 часа</span>
-        </div>
-        <ul class="mt-4 space-y-1.5 pl-5 hint list-disc marker:text-edge">
-          <li>Весь поиск и лента</li>
-          <li>Один раз на аккаунт</li>
-        </ul>
-        <div class="mt-auto pt-6">
-          <button class="btn-soft w-full" id="plan-trial" type="button">Активировать</button>
-          <p class="mt-3 hint" id="trial-hint"></p>
-        </div>
-      </article>
-
-      <article class="panel flex flex-col border-brand ring-1 ring-brand/40">
-        <h3 class="text-base font-semibold">Подписка</h3>
-        <div class="mt-4 text-4xl font-bold tracking-tight" id="plan-price">
-          3 000 ₽ <span class="text-base font-semibold text-muted">/ 30 дней</span>
-        </div>
-        <div class="promo-row mt-4">
-          <input id="promo-input" type="text" class="field" placeholder="Промокод" />
-          <button id="promo-apply" type="button" class="btn-ghost w-full">Применить</button>
-        </div>
-        <p class="mt-3 hint text-xs sm:text-[13px]" id="promo-hint">WELCOME — 20%, AVITO500 — −500 ₽, START — месяц бесплатно</p>
-        <div class="mt-auto pt-6">
-          <button class="btn-primary w-full" id="plan-pay" type="button">Оформить за 3 000 ₽</button>
-        </div>
-      </article>
-    </div>
-
-    <p class="wrap pb-14 hint">Оплата учебная. Код из SMS всегда 1111.</p>
-  </section>
-
-  <div class="modal-back hidden" id="pay-modal">
-    <div class="panel relative">
-      <button class="absolute top-4 right-4 grid size-8 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-xl leading-none text-muted hover:bg-raised hover:text-body" id="pay-close" type="button" aria-label="Закрыть">×</button>
-      <h2 class="text-xl font-semibold" id="pay-title">Вход по телефону</h2>
-      <p class="mt-1.5 hint" id="pay-sum">Код 1111 создаёт учётную запись</p>
-
-      <div id="auth-step" class="mt-5 space-y-4">
+  <div class="modal-back" id="auth-modal">
+    <div class="panel relative max-w-sm">
+      <h2 class="text-xl font-semibold">Вход</h2>
+      <p class="mt-1.5 hint">Мониторинг объявлений Avito</p>
+      <form id="auth-form" class="mt-5 space-y-4" autocomplete="on">
         <div class="space-y-1.5">
-          <label class="hint" for="pay-phone">Телефон</label>
-          <input id="pay-phone" type="tel" class="field" placeholder="+7 999 123-45-67" />
+          <label class="hint" for="auth-login">Логин</label>
+          <input id="auth-login" type="text" class="field" autocomplete="username" />
         </div>
         <div class="space-y-1.5">
-          <label class="hint" for="pay-code">Код из SMS</label>
-          <input id="pay-code" type="text" class="field" inputmode="numeric" placeholder="1111" maxlength="6" />
+          <label class="hint" for="auth-password">Пароль</label>
+          <input id="auth-password" type="password" class="field" autocomplete="current-password" />
         </div>
-        <p class="hint min-h-5" id="pay-hint"></p>
-        <div class="modal-actions">
-          <button class="btn-ghost w-full" id="pay-sms" type="button">Выслать код</button>
-          <button class="btn-primary w-full" id="pay-verify" type="button">Подтвердить</button>
-        </div>
-      </div>
-
-      <div id="account-step" class="mt-5 hidden space-y-4">
-        <p class="hint min-h-5" id="account-hint"></p>
-        <div class="modal-actions">
-          <button class="btn-primary hidden w-full" id="pay-confirm" type="button">Оплатить</button>
-          <button class="btn-soft hidden w-full" id="pay-trial" type="button">Включить пробный</button>
-        </div>
-      </div>
+        <p class="hint min-h-5 text-sm text-red-400" id="auth-hint"></p>
+        <button class="btn-primary w-full" id="auth-submit" type="submit">Войти</button>
+      </form>
     </div>
   </div>
 
@@ -158,7 +76,6 @@
           <button type="button" class="avito-link" id="avito-session" title="Для кнопки «Позвонить»">Avito: …</button>
           <span class="status text-xs text-muted sm:text-[13px]" id="status">ожидание поиска</span>
           <button class="btn-ghost btn-sm" id="toggle-search" type="button">Скрыть</button>
-          <button class="btn-ghost btn-sm hidden sm:inline-flex" id="back-plans" type="button">Тарифы</button>
           <button class="btn-ghost btn-sm" id="reset" type="button">Сбросить</button>
         </div>
       </div>

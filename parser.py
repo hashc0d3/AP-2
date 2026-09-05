@@ -709,11 +709,6 @@ def parse_once(cfg: dict, session: dict, seen: set[int], first: bool) -> tuple[d
             f"сообщение {sum(m for _, m in flags)}/{len(to_show)}"
         )
 
-    for item in to_show:
-        print("\n" + "=" * 40)
-        print(format_ad(item))
-        print("=" * 40)
-
     save_seen(seen)
     return session, seen, to_show, blocked
 
@@ -722,8 +717,9 @@ def main() -> None:
     from avito_search import apply_runtime, sleep_or_restart, snapshot as search_snapshot, wait_for_search
     from webui import clear_ads, publish_ads, start_server
 
-    Path("logs").mkdir(exist_ok=True)
-    logger.add("logs/parser.log", rotation="2 MB", retention="3 days")
+    from log_setup import setup_file_log
+
+    setup_file_log("parser.log")
     cfg = load_config()
     from cookie_service import start_background
 

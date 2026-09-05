@@ -219,6 +219,7 @@ def open_avito() -> None:
 
 
 if __name__ == "__main__":
-    Path("logs").mkdir(exist_ok=True)
-    logger.add("logs/browser.log", rotation="2 MB", retention="3 days")
+    from log_setup import setup_file_log
+
+    setup_file_log("browser.log")
     open_avito()
