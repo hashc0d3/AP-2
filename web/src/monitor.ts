@@ -1,4 +1,5 @@
 import { api } from "./api";
+import { isMobileDevice, openInAvitoApp } from "./avito-app";
 import { escapeHtml, imgSrc } from "./format";
 import type { Ad, BillingStatus, Category, Region } from "./types";
 
@@ -23,6 +24,22 @@ export function mountMonitor(): {
   const app = $("app");
   const feed = $("feed");
   const statusEl = $("status");
+  const avitoSessionEl = $("avito-session");
+  const avitoModal = $("avito-modal");
+  const avitoStatusLine = $("avito-status-line");
+  const avitoHint = $("avito-hint");
+  const avitoImport = $("avito-import") as HTMLButtonElement;
+  const avitoConnectedBox = $("avito-connected-box");
+  const avitoLoginBox = $("avito-login-box");
+  const avitoConnectedLabel = $("avito-connected-label");
+  const avitoReset = $("avito-reset") as HTMLButtonElement;
+  const avitoCookies = $("avito-cookies") as HTMLTextAreaElement;
+  const isIOS = /iPad|iPhone|iPod/i.test(navigator.userAgent);
+  $("avito-ios-hint").classList.toggle("hidden", !isIOS);
+  $("avito-android-hint").classList.toggle("hidden", isIOS);
+  if (isMobileDevice) {
+    avitoSessionEl.classList.add("hidden");
+  }
   const titleEl = $("title");
   const queryEl = input("query");
   const regionBtn = $("region-btn");
@@ -47,6 +64,108 @@ export function mountMonitor(): {
   let monitoring = false;
   let started = false;
   let events: EventSource | null = null;
+  let avitoConnected = false;
+  const phoneCache = new Map<string, string>();
+
+  const setAvitoSession = (connected: boolean, label = "") => {
+    avitoConnected = connected;
+    avitoSessionEl.classList.toggle("on", connected);
+    avitoSessionEl.classList.toggle("off", !connected);
+    avitoSessionEl.textContent = connected ? `Avito: ${label || "вход"}` : "Avito: подключить";
+    avitoSessionEl.title = connected
+      ? "Аккаунт подключён"
+      : "Подключить Avito для кнопки «Позвонить»";
+  };
+
+  const updateAvitoModal = (data: { connected?: boolean; label?: string; error?: string }) => {
+    const connected = Boolean(data.connected);
+    const label = data.label || "";
+    avitoStatusLine.textContent = connected ? `Подключён${label ? ` (${label})` : ""}` : "Не подключён";
+    setAvitoSession(connected, label);
+    avitoConnectedBox.classList.toggle("hidden", !connected);
+    avitoLoginBox.classList.toggle("hidden", connected);
+    avitoConnectedLabel.textContent = label || "вход";
+    if (data.error) avitoHint.textContent = data.error;
+  };
+
+  const resetAvitoConnection = async (hint = "Подключение сброшено") => {
+    await api.clearAvitoSession().catch(() => undefined);
+    avitoCookies.value = "";
+    updateAvitoModal({ connected: false });
+    avitoHint.textContent = hint;
+  };
+
+  const openAvitoModal = () => {
+    avitoModal.classList.remove("hidden");
+    avitoHint.textContent = "";
+    void refreshAvitoSession();
+  };
+
+  const closeAvitoModal = () => {
+    avitoModal.classList.add("hidden");
+  };
+
+  const refreshAvitoSession = async () => {
+    try {
+      const data = await api.avitoSession();
+      updateAvitoModal({ connected: data.connected, label: data.label });
+    } catch {
+      setAvitoSession(false);
+    }
+  };
+
+  const dialPhone = (phone: string) => {
+    const link = document.createElement("a");
+    link.href = `tel:${phone}`;
+    link.rel = "noopener";
+    link.click();
+  };
+
+  const requestPhone = async (ad: Ad, btn: HTMLButtonElement) => {
+    if (!ad.can_call) {
+      openInAvitoApp(ad);
+      return;
+    }
+    if (isMobileDevice) {
+      openInAvitoApp(ad);
+      return;
+    }
+    const id = String(ad.id);
+    const cached = phoneCache.get(id);
+    if (cached) {
+      dialPhone(cached);
+      return;
+    }
+    if (!avitoConnected) {
+      openAvitoModal();
+      return;
+    }
+    const prev = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "…";
+    try {
+      const result = await api.avitoPhone(id);
+      if (result.ok && result.phone) {
+        phoneCache.set(id, result.phone);
+        btn.textContent = result.phone;
+        dialPhone(result.phone);
+        return;
+      }
+      const message = result.error || "Номер недоступен";
+      if (result.code === "no_session" || result.code === "not_logged_in" || result.code === "auth_required") {
+        setAvitoSession(false);
+        openAvitoModal();
+      } else {
+        window.alert(message);
+      }
+      btn.textContent = prev || "Позвонить";
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : String(err));
+      btn.textContent = prev || "Позвонить";
+    } finally {
+      btn.disabled = false;
+    }
+  };
 
   const loadCache = () => {
     try {
@@ -94,12 +213,21 @@ export function mountMonitor(): {
           <span class="tag ${ad.can_message ? "on" : "off"}">${ad.can_message ? "Сообщение" : "Без сообщений"}</span>
         </div>
         <div class="actions">
-          <a class="call${ad.can_call ? "" : " muted"}" href="${ad.url}" target="_blank" rel="noopener">Позвонить</a>
+          <button class="call${ad.can_call ? "" : " muted"}" type="button" data-action="call">${ad.can_call ? (isMobileDevice ? "В Avito" : "Позвонить") : "Открыть"}</button>
           <a class="msg${ad.can_message ? "" : " muted"}" href="${ad.url}" target="_blank" rel="noopener">Написать</a>
           <a class="open" href="${ad.url}" target="_blank" rel="noopener">Открыть</a>
         </div>
       </div>
     </article>`;
+  };
+
+  const bindCardActions = (card: HTMLElement, ad: Ad) => {
+    const callBtn = card.querySelector('button[data-action="call"]') as HTMLButtonElement | null;
+    if (!callBtn) return;
+    callBtn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      void requestPhone(ad, callBtn);
+    });
   };
 
   const bindGallery = (card: HTMLElement) => {
@@ -143,6 +271,7 @@ export function mountMonitor(): {
     const el = wrap.firstElementChild as HTMLElement;
     if (fresh) el.classList.add("fresh");
     bindGallery(el);
+    bindCardActions(el, ad);
     return el;
   };
 
@@ -336,6 +465,42 @@ export function mountMonitor(): {
         /* empty */
       }
       clearFeed();
+    });
+    if (!isMobileDevice) void refreshAvitoSession();
+    if (!isMobileDevice) {
+      avitoSessionEl.addEventListener("click", () => openAvitoModal());
+    }
+    $("avito-close").addEventListener("click", () => closeAvitoModal());
+    avitoModal.addEventListener("click", (ev) => {
+      if (ev.target === avitoModal) closeAvitoModal();
+    });
+    $("avito-open-login").addEventListener("click", () => {
+      window.open("https://m.avito.ru/profile/login", "_blank", "noopener");
+      avitoHint.textContent = "После входа экспортируйте cookies и вставьте JSON ниже";
+    });
+    avitoReset.addEventListener("click", () => {
+      avitoReset.disabled = true;
+      void resetAvitoConnection().finally(() => {
+        avitoReset.disabled = false;
+      });
+    });
+    avitoImport.addEventListener("click", () => {
+      const raw = avitoCookies.value.trim();
+      if (!raw) {
+        avitoHint.textContent = "Вставьте JSON cookies";
+        return;
+      }
+      avitoImport.disabled = true;
+      void api.importAvitoSession(raw).then((data) => {
+        avitoHint.textContent = "Сохранено";
+        avitoCookies.value = "";
+        updateAvitoModal({ connected: data.connected, label: data.label });
+        closeAvitoModal();
+      }).catch((err) => {
+        avitoHint.textContent = err instanceof Error ? err.message : String(err);
+      }).finally(() => {
+        avitoImport.disabled = false;
+      });
     });
     void api.categories().then(renderCats).catch(() => undefined);
     refreshPreview();

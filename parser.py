@@ -93,8 +93,9 @@ def build_client(session: dict, proxy_string: str) -> curl_requests.Session:
     client = curl_requests.Session(impersonate=impersonate)
     client.headers.update(headers)
     client.cookies.update(session.get("cookies") or {})
-    proxy_url = f"http://{proxy_string}"
-    client.proxies = {"http": proxy_url, "https": proxy_url}
+    if proxy_string:
+        proxy_url = f"http://{proxy_string}"
+        client.proxies = {"http": proxy_url, "https": proxy_url}
     return client
 
 
@@ -609,6 +610,12 @@ def fetch_items(cfg: dict, session: dict) -> tuple[dict, int, list[dict], bool]:
             client = build_client(session, cfg["proxy_string"])
             status, payload = fetch_page(client, url)
 
+        if not payload and status == 200:
+            logger.warning("200 без JSON — антибот или HTML вместо API, меняю IP")
+            session = rotate_ip(cfg, session)
+            client = build_client(session, cfg["proxy_string"])
+            status, payload = fetch_page(client, url)
+
         if not payload:
             logger.error(f"Не удалось получить JSON, status={status}, page={page}")
             blocked = True
@@ -769,7 +776,14 @@ def main() -> None:
                     logger.info("Поисковый запрос обновлён, перезапускаю мониторинг")
                 break
             if blocked:
-                logger.info("После блока сразу следующий запрос, без паузы")
+                logger.info(f"Запрос не прошёл, пауза {pause_min} сек. перед повтором")
+                if not sleep_or_restart(pause_min, generation):
+                    state = search_snapshot()
+                    if not state["running"]:
+                        logger.info("Мониторинг остановлен, жду новый запуск")
+                    else:
+                        logger.info("Поисковый запрос обновлён, перезапускаю мониторинг")
+                    break
                 continue
             logger.info(f"Пауза {pause_min} сек.")
             if not sleep_or_restart(pause_min, generation):

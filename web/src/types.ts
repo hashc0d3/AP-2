@@ -44,6 +44,28 @@ export type SearchState = {
   subscription?: BillingStatus;
 };
 
+export type AvitoConnectStatus = {
+  running: boolean;
+  step: string;
+  error?: string;
+  connected: boolean;
+  label?: string;
+  phone?: string;
+};
+
+export type AvitoSession = AvitoConnectStatus & {
+  logged_in: boolean;
+  saved_at?: number;
+  connect?: AvitoConnectStatus;
+};
+
+export type AvitoPhoneResult = {
+  ok: boolean;
+  phone?: string;
+  error?: string;
+  code?: string;
+};
+
 export type Ad = {
   id: string | number;
   title: string;

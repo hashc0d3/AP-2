@@ -1,4 +1,4 @@
-import type { Ad, BillingStatus, Category, PromoQuote, Region, SearchState } from "./types";
+import type { Ad, AvitoConnectStatus, AvitoPhoneResult, AvitoSession, BillingStatus, Category, PromoQuote, Region, SearchState } from "./types";
 
 async function readJson<T>(res: Response): Promise<T> {
   const data = (await res.json()) as T & { error?: string };
@@ -74,5 +74,27 @@ export const api = {
   },
   reset(): Promise<void> {
     return fetch("/api/reset", { method: "POST" }).then((r) => readJson(r)).then(() => undefined);
+  },
+  avitoSession(): Promise<AvitoSession> {
+    return fetch("/api/avito/session").then((r) => readJson<AvitoSession>(r));
+  },
+  importAvitoSession(raw: string): Promise<AvitoSession> {
+    const trimmed = raw.trim();
+    const body = trimmed.startsWith("[") ? trimmed : JSON.stringify({ cookies: JSON.parse(trimmed) });
+    return fetch("/api/avito/session/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    }).then((r) => readJson<AvitoSession>(r));
+  },
+  clearAvitoSession(): Promise<AvitoSession> {
+    return fetch("/api/avito/session/clear", { method: "POST" }).then((r) => readJson<AvitoSession>(r));
+  },
+  avitoPhone(adId: string | number): Promise<AvitoPhoneResult> {
+    return fetch("/api/avito/phone", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ad_id: String(adId) }),
+    }).then((r) => readJson<AvitoPhoneResult>(r));
   },
 };

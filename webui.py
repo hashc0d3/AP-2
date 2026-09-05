@@ -14,6 +14,9 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from avito_search import list_categories, preview, search_regions, snapshot, start_search, stop_search
+from avito_connect import connect_status, reset_connect, start_connect
+from avito_login import login_status, queue_code, queue_phone, reset_login
+from avito_user import clear_user_session, fetch_user_phone, normalize_import, save_user_session, session_status
 from subscription import (
     activate_trial,
     is_active,
@@ -220,6 +223,21 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/status":
             self._json(200, snapshot() | {"subscription": public_status()})
             return
+        if parsed.path == "/api/avito/session":
+            if not self._require_sub():
+                return
+            self._json(200, session_status() | {"connect": connect_status()})
+            return
+        if parsed.path == "/api/avito/connect/status":
+            if not self._require_sub():
+                return
+            self._json(200, connect_status())
+            return
+        if parsed.path == "/api/avito/login/status":
+            if not self._require_sub():
+                return
+            self._json(200, login_status())
+            return
         if parsed.path == "/img":
             url = (parse_qs(parsed.query).get("u") or [""])[0]
             if not url or not _allowed_image(url):
@@ -297,12 +315,15 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_error(404)
 
-    def _read_json(self) -> dict:
+    def _read_json_body(self) -> dict | list:
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length) if length else b"{}"
         if not raw:
             return {}
-        data = json.loads(raw.decode("utf-8"))
+        return json.loads(raw.decode("utf-8-sig"))
+
+    def _read_json(self) -> dict:
+        data = self._read_json_body()
         return data if isinstance(data, dict) else {}
 
     def do_POST(self) -> None:  # noqa: N802
@@ -381,6 +402,85 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/search/stop":
             data = stop_search()
             self._json(200, {"ok": True, **data})
+            return
+        if parsed.path == "/api/avito/session/clear":
+            if not self._require_sub():
+                return
+            clear_user_session()
+            self._json(200, {"ok": True, **session_status()})
+            return
+        if parsed.path == "/api/avito/phone":
+            if not self._require_sub():
+                return
+            try:
+                payload = self._read_json()
+            except ValueError:
+                self._json(400, {"error": "Некорректный JSON"})
+                return
+            ad_id = payload.get("ad_id") or payload.get("id")
+            if not ad_id:
+                self._json(400, {"error": "Укажите ad_id"})
+                return
+            self._json(200, fetch_user_phone(ad_id))
+            return
+        if parsed.path == "/api/avito/session/import":
+            if not self._require_sub():
+                return
+            try:
+                payload = self._read_json_body()
+                session = save_user_session(normalize_import(payload))
+            except ValueError as err:
+                self._json(400, {"error": str(err)})
+                return
+            self._json(200, {"ok": True, **session_status(), "label": session.get("label")})
+            return
+        if parsed.path == "/api/avito/connect/reset":
+            if not self._require_sub():
+                return
+            self._json(200, reset_connect())
+            return
+        if parsed.path == "/api/avito/connect/start":
+            if not self._require_sub():
+                return
+            try:
+                data = start_connect()
+            except Exception as err:
+                self._json(502, {"error": str(err)})
+                return
+            self._json(200, data)
+            return
+        if parsed.path == "/api/avito/login/sms":
+            if not self._require_sub():
+                return
+            try:
+                payload = self._read_json()
+                data = queue_phone(str(payload.get("phone") or ""))
+            except ValueError as err:
+                self._json(400, {"error": str(err)})
+                return
+            except Exception as err:
+                self._json(502, {"error": str(err)})
+                return
+            self._json(200, data)
+            return
+        if parsed.path == "/api/avito/login/verify":
+            if not self._require_sub():
+                return
+            try:
+                payload = self._read_json()
+                data = queue_code(str(payload.get("code") or ""))
+            except ValueError as err:
+                self._json(400, {"error": str(err)})
+                return
+            except Exception as err:
+                self._json(502, {"error": str(err)})
+                return
+            self._json(200, data)
+            return
+        if parsed.path == "/api/avito/login/reset":
+            if not self._require_sub():
+                return
+            self._json(200, reset_login())
             return
         self.send_error(404)
 

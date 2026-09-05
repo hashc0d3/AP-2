@@ -715,9 +715,27 @@
   min-width: 0;
 }
 
-.card .actions a {
+.card .actions a,
+.card .actions button.call {
   @apply inline-flex w-full items-center justify-center rounded-lg px-3.5 py-2.5
-         text-sm font-semibold text-white no-underline sm:py-2;
+         text-sm font-semibold text-white no-underline sm:py-2 border-0 cursor-pointer;
+}
+
+.card .actions button.call:disabled {
+  @apply opacity-60 cursor-wait;
+}
+
+.monitor-actions .avito-link {
+  @apply max-w-[8.5rem] truncate rounded-full border border-edge px-2 py-1 text-[10px] text-muted
+         sm:max-w-[11rem] sm:text-[11px];
+}
+
+.monitor-actions .avito-link.on {
+  @apply border-emerald-700/50 text-emerald-300;
+}
+
+.monitor-actions .avito-link.off {
+  @apply border-amber-700/40 text-amber-200 cursor-pointer;
 }
 
 .card .actions .call { @apply bg-emerald-600 hover:bg-emerald-500; }
