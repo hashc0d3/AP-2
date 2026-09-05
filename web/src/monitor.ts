@@ -1,5 +1,4 @@
 import { api } from "./api";
-import { isMobileDevice, openInAvitoApp } from "./avito-app";
 import { escapeHtml, imgSrc } from "./format";
 import type { Ad, BillingStatus, Category, Region } from "./types";
 
@@ -29,21 +28,11 @@ export function mountMonitor(): {
   const avitoStatusLine = $("avito-status-line");
   const avitoHint = $("avito-hint");
   const avitoImport = $("avito-import") as HTMLButtonElement;
-  const avitoImportMobile = $("avito-import-mobile") as HTMLButtonElement;
   const avitoConnectedBox = $("avito-connected-box");
-  const avitoMobileBox = $("avito-mobile-box");
-  const avitoDesktopBox = $("avito-desktop-box");
-  const avitoModalSubtitle = $("avito-modal-subtitle");
+  const avitoSetupBox = $("avito-setup-box");
   const avitoConnectedLabel = $("avito-connected-label");
   const avitoReset = $("avito-reset") as HTMLButtonElement;
   const avitoCookies = $("avito-cookies") as HTMLTextAreaElement;
-  const avitoCookiesMobile = $("avito-cookies-mobile") as HTMLTextAreaElement;
-  const avitoHintMobile = $("avito-hint-mobile");
-  if (isMobileDevice) {
-    avitoMobileBox.classList.remove("hidden");
-    avitoDesktopBox.classList.add("hidden");
-    avitoModalSubtitle.textContent = "На телефоне звонок — через приложение Avito.";
-  }
   const titleEl = $("title");
   const queryEl = input("query");
   const regionBtn = $("region-btn");
@@ -75,12 +64,10 @@ export function mountMonitor(): {
     avitoConnected = connected;
     avitoSessionEl.classList.toggle("on", connected);
     avitoSessionEl.classList.toggle("off", !connected);
-    avitoSessionEl.textContent = connected
-      ? (isMobileDevice ? "Avito: вход" : `Avito: ${label || "вход"}`)
-      : (isMobileDevice ? "Как звонить" : "Avito: подключить");
+    avitoSessionEl.textContent = connected ? `Avito: ${label || "вход"}` : "Avito: подключить";
     avitoSessionEl.title = connected
       ? "Аккаунт подключён"
-      : (isMobileDevice ? "Как позвонить через приложение Avito" : "Подключить Avito для кнопки «Позвонить»");
+      : "Подключить Avito через Kiwi Browser";
   };
 
   const updateAvitoModal = (data: { connected?: boolean; label?: string; error?: string }) => {
@@ -89,8 +76,7 @@ export function mountMonitor(): {
     avitoStatusLine.textContent = connected ? `Подключён${label ? ` (${label})` : ""}` : "Не подключён";
     setAvitoSession(connected, label);
     avitoConnectedBox.classList.toggle("hidden", !connected);
-    avitoMobileBox.classList.toggle("hidden", connected || !isMobileDevice);
-    avitoDesktopBox.classList.toggle("hidden", connected || isMobileDevice);
+    avitoSetupBox.classList.toggle("hidden", connected);
     avitoConnectedLabel.textContent = label || "вход";
     if (data.error) avitoHint.textContent = data.error;
   };
@@ -98,16 +84,13 @@ export function mountMonitor(): {
   const resetAvitoConnection = async (hint = "Подключение сброшено") => {
     await api.clearAvitoSession().catch(() => undefined);
     avitoCookies.value = "";
-    avitoCookiesMobile.value = "";
     updateAvitoModal({ connected: false });
     avitoHint.textContent = hint;
-    avitoHintMobile.textContent = hint;
   };
 
   const openAvitoModal = () => {
     avitoModal.classList.remove("hidden");
     avitoHint.textContent = "";
-    avitoHintMobile.textContent = "";
     void refreshAvitoSession();
   };
 
@@ -133,11 +116,7 @@ export function mountMonitor(): {
 
   const requestPhone = async (ad: Ad, btn: HTMLButtonElement) => {
     if (!ad.can_call) {
-      openInAvitoApp(ad);
-      return;
-    }
-    if (isMobileDevice) {
-      openInAvitoApp(ad);
+      window.open(ad.url, "_blank", "noopener");
       return;
     }
     const id = String(ad.id);
@@ -223,7 +202,7 @@ export function mountMonitor(): {
           <span class="tag ${ad.can_message ? "on" : "off"}">${ad.can_message ? "Сообщение" : "Без сообщений"}</span>
         </div>
         <div class="actions">
-          <button class="call${ad.can_call ? "" : " muted"}" type="button" data-action="call">${ad.can_call ? (isMobileDevice ? "В Avito" : "Позвонить") : "Открыть"}</button>
+          <button class="call${ad.can_call ? "" : " muted"}" type="button" data-action="call">${ad.can_call ? "Позвонить" : "Открыть"}</button>
           <a class="msg${ad.can_message ? "" : " muted"}" href="${ad.url}" target="_blank" rel="noopener">Написать</a>
           <a class="open" href="${ad.url}" target="_blank" rel="noopener">Открыть</a>
         </div>
@@ -483,22 +462,21 @@ export function mountMonitor(): {
       if (ev.target === avitoModal) closeAvitoModal();
     });
     $("avito-open-login").addEventListener("click", () => {
-      window.open("https://www.avito.ru/#login?authsrc=h", "_blank", "noopener");
+      window.open("https://m.avito.ru", "_blank", "noopener");
       avitoHint.textContent = "После входа: Cookie-Editor → Export → вставьте JSON ниже";
     });
-    const importCookies = (raw: string, hintEl: HTMLElement, onOk: () => void) => {
+    const importCookies = (raw: string) => {
       if (!raw.trim()) {
-        hintEl.textContent = "Вставьте JSON cookies";
+        avitoHint.textContent = "Вставьте JSON cookies";
         return;
       }
       void api.importAvitoSession(raw).then((data) => {
-        hintEl.textContent = "Сохранено";
+        avitoHint.textContent = "Сохранено";
         avitoCookies.value = "";
-        avitoCookiesMobile.value = "";
         updateAvitoModal({ connected: data.connected, label: data.label });
-        onOk();
+        closeAvitoModal();
       }).catch((err) => {
-        hintEl.textContent = err instanceof Error ? err.message : String(err);
+        avitoHint.textContent = err instanceof Error ? err.message : String(err);
       });
     };
     avitoReset.addEventListener("click", () => {
@@ -509,13 +487,8 @@ export function mountMonitor(): {
     });
     avitoImport.addEventListener("click", () => {
       avitoImport.disabled = true;
-      importCookies(avitoCookies.value, avitoHint, () => closeAvitoModal());
+      importCookies(avitoCookies.value);
       avitoImport.disabled = false;
-    });
-    avitoImportMobile.addEventListener("click", () => {
-      avitoImportMobile.disabled = true;
-      importCookies(avitoCookiesMobile.value, avitoHintMobile, () => closeAvitoModal());
-      avitoImportMobile.disabled = false;
     });
     void api.categories().then(renderCats).catch(() => undefined);
     refreshPreview();
