@@ -37,9 +37,6 @@ export function mountMonitor(): {
   const isIOS = /iPad|iPhone|iPod/i.test(navigator.userAgent);
   $("avito-ios-hint").classList.toggle("hidden", !isIOS);
   $("avito-android-hint").classList.toggle("hidden", isIOS);
-  if (isMobileDevice) {
-    avitoSessionEl.classList.add("hidden");
-  }
   const titleEl = $("title");
   const queryEl = input("query");
   const regionBtn = $("region-btn");
@@ -71,7 +68,9 @@ export function mountMonitor(): {
     avitoConnected = connected;
     avitoSessionEl.classList.toggle("on", connected);
     avitoSessionEl.classList.toggle("off", !connected);
-    avitoSessionEl.textContent = connected ? `Avito: ${label || "вход"}` : "Avito: подключить";
+    avitoSessionEl.textContent = connected
+      ? (isMobileDevice ? `Avito: ${label ? "вход" : "ок"}` : `Avito: ${label || "вход"}`)
+      : (isMobileDevice ? "Avito" : "Avito: подключить");
     avitoSessionEl.title = connected
       ? "Аккаунт подключён"
       : "Подключить Avito для кнопки «Позвонить»";
@@ -466,10 +465,8 @@ export function mountMonitor(): {
       }
       clearFeed();
     });
-    if (!isMobileDevice) void refreshAvitoSession();
-    if (!isMobileDevice) {
-      avitoSessionEl.addEventListener("click", () => openAvitoModal());
-    }
+    void refreshAvitoSession();
+    avitoSessionEl.addEventListener("click", () => openAvitoModal());
     $("avito-close").addEventListener("click", () => closeAvitoModal());
     avitoModal.addEventListener("click", (ev) => {
       if (ev.target === avitoModal) closeAvitoModal();

@@ -728,6 +728,29 @@
 .monitor-actions .avito-link {
   @apply max-w-[8.5rem] truncate rounded-full border border-edge px-2 py-1 text-[10px] text-muted
          sm:max-w-[11rem] sm:text-[11px];
+  cursor: pointer;
+  background: transparent;
+  font: inherit;
+}
+
+@media (max-width: 639px) {
+  .monitor-actions .avito-link {
+    order: -1;
+    flex: 1 1 100%;
+    max-width: none;
+    padding: 0.5rem 0.75rem;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .monitor-actions .avito-link.off {
+    @apply border-amber-600/60 bg-amber-950/40;
+  }
+
+  .monitor-actions .avito-link.on {
+    @apply border-emerald-600/50 bg-emerald-950/30;
+  }
 }
 
 .monitor-actions .avito-link.on {
