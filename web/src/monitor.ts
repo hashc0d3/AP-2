@@ -29,14 +29,21 @@ export function mountMonitor(): {
   const avitoStatusLine = $("avito-status-line");
   const avitoHint = $("avito-hint");
   const avitoImport = $("avito-import") as HTMLButtonElement;
+  const avitoImportMobile = $("avito-import-mobile") as HTMLButtonElement;
   const avitoConnectedBox = $("avito-connected-box");
-  const avitoLoginBox = $("avito-login-box");
+  const avitoMobileBox = $("avito-mobile-box");
+  const avitoDesktopBox = $("avito-desktop-box");
+  const avitoModalSubtitle = $("avito-modal-subtitle");
   const avitoConnectedLabel = $("avito-connected-label");
   const avitoReset = $("avito-reset") as HTMLButtonElement;
   const avitoCookies = $("avito-cookies") as HTMLTextAreaElement;
-  const isIOS = /iPad|iPhone|iPod/i.test(navigator.userAgent);
-  $("avito-ios-hint").classList.toggle("hidden", !isIOS);
-  $("avito-android-hint").classList.toggle("hidden", isIOS);
+  const avitoCookiesMobile = $("avito-cookies-mobile") as HTMLTextAreaElement;
+  const avitoHintMobile = $("avito-hint-mobile");
+  if (isMobileDevice) {
+    avitoMobileBox.classList.remove("hidden");
+    avitoDesktopBox.classList.add("hidden");
+    avitoModalSubtitle.textContent = "На телефоне звонок — через приложение Avito.";
+  }
   const titleEl = $("title");
   const queryEl = input("query");
   const regionBtn = $("region-btn");
@@ -69,11 +76,11 @@ export function mountMonitor(): {
     avitoSessionEl.classList.toggle("on", connected);
     avitoSessionEl.classList.toggle("off", !connected);
     avitoSessionEl.textContent = connected
-      ? (isMobileDevice ? `Avito: ${label ? "вход" : "ок"}` : `Avito: ${label || "вход"}`)
-      : (isMobileDevice ? "Avito" : "Avito: подключить");
+      ? (isMobileDevice ? "Avito: вход" : `Avito: ${label || "вход"}`)
+      : (isMobileDevice ? "Как звонить" : "Avito: подключить");
     avitoSessionEl.title = connected
       ? "Аккаунт подключён"
-      : "Подключить Avito для кнопки «Позвонить»";
+      : (isMobileDevice ? "Как позвонить через приложение Avito" : "Подключить Avito для кнопки «Позвонить»");
   };
 
   const updateAvitoModal = (data: { connected?: boolean; label?: string; error?: string }) => {
@@ -82,7 +89,8 @@ export function mountMonitor(): {
     avitoStatusLine.textContent = connected ? `Подключён${label ? ` (${label})` : ""}` : "Не подключён";
     setAvitoSession(connected, label);
     avitoConnectedBox.classList.toggle("hidden", !connected);
-    avitoLoginBox.classList.toggle("hidden", connected);
+    avitoMobileBox.classList.toggle("hidden", connected || !isMobileDevice);
+    avitoDesktopBox.classList.toggle("hidden", connected || isMobileDevice);
     avitoConnectedLabel.textContent = label || "вход";
     if (data.error) avitoHint.textContent = data.error;
   };
@@ -90,13 +98,16 @@ export function mountMonitor(): {
   const resetAvitoConnection = async (hint = "Подключение сброшено") => {
     await api.clearAvitoSession().catch(() => undefined);
     avitoCookies.value = "";
+    avitoCookiesMobile.value = "";
     updateAvitoModal({ connected: false });
     avitoHint.textContent = hint;
+    avitoHintMobile.textContent = hint;
   };
 
   const openAvitoModal = () => {
     avitoModal.classList.remove("hidden");
     avitoHint.textContent = "";
+    avitoHintMobile.textContent = "";
     void refreshAvitoSession();
   };
 
@@ -472,9 +483,24 @@ export function mountMonitor(): {
       if (ev.target === avitoModal) closeAvitoModal();
     });
     $("avito-open-login").addEventListener("click", () => {
-      window.open("https://m.avito.ru/profile/login", "_blank", "noopener");
-      avitoHint.textContent = "После входа экспортируйте cookies и вставьте JSON ниже";
+      window.open("https://www.avito.ru/#login?authsrc=h", "_blank", "noopener");
+      avitoHint.textContent = "После входа: Cookie-Editor → Export → вставьте JSON ниже";
     });
+    const importCookies = (raw: string, hintEl: HTMLElement, onOk: () => void) => {
+      if (!raw.trim()) {
+        hintEl.textContent = "Вставьте JSON cookies";
+        return;
+      }
+      void api.importAvitoSession(raw).then((data) => {
+        hintEl.textContent = "Сохранено";
+        avitoCookies.value = "";
+        avitoCookiesMobile.value = "";
+        updateAvitoModal({ connected: data.connected, label: data.label });
+        onOk();
+      }).catch((err) => {
+        hintEl.textContent = err instanceof Error ? err.message : String(err);
+      });
+    };
     avitoReset.addEventListener("click", () => {
       avitoReset.disabled = true;
       void resetAvitoConnection().finally(() => {
@@ -482,22 +508,14 @@ export function mountMonitor(): {
       });
     });
     avitoImport.addEventListener("click", () => {
-      const raw = avitoCookies.value.trim();
-      if (!raw) {
-        avitoHint.textContent = "Вставьте JSON cookies";
-        return;
-      }
       avitoImport.disabled = true;
-      void api.importAvitoSession(raw).then((data) => {
-        avitoHint.textContent = "Сохранено";
-        avitoCookies.value = "";
-        updateAvitoModal({ connected: data.connected, label: data.label });
-        closeAvitoModal();
-      }).catch((err) => {
-        avitoHint.textContent = err instanceof Error ? err.message : String(err);
-      }).finally(() => {
-        avitoImport.disabled = false;
-      });
+      importCookies(avitoCookies.value, avitoHint, () => closeAvitoModal());
+      avitoImport.disabled = false;
+    });
+    avitoImportMobile.addEventListener("click", () => {
+      avitoImportMobile.disabled = true;
+      importCookies(avitoCookiesMobile.value, avitoHintMobile, () => closeAvitoModal());
+      avitoImportMobile.disabled = false;
     });
     void api.categories().then(renderCats).catch(() => undefined);
     refreshPreview();

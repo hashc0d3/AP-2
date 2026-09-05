@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Сигнал — новые объявления Avito</title>
-  <script type="module" crossorigin src="/assets/index-DkxCJ5Wq.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-B2nWPplW.css">
+  <script type="module" crossorigin src="/assets/index-X99vCRBc.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-oz_lGGY6.css">
 </head>
 <body>
   <header class="sticky top-0 z-30 border-b border-edge bg-ink/90 backdrop-blur-md">
@@ -125,7 +125,7 @@
     <div class="panel relative max-w-lg">
       <button class="absolute top-4 right-4 grid size-8 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-xl leading-none text-muted hover:bg-raised hover:text-body" id="avito-close" type="button" aria-label="Закрыть">×</button>
       <h2 class="text-xl font-semibold">Аккаунт Avito</h2>
-      <p class="mt-1.5 hint">Для кнопки «Позвонить». Вход через браузер телефона и cookies.</p>
+      <p class="mt-1.5 hint" id="avito-modal-subtitle">Для кнопки «Позвонить» на компьютере.</p>
       <p class="mt-3 text-sm" id="avito-status-line">Не подключён</p>
 
       <div id="avito-connected-box" class="mt-5 hidden space-y-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
@@ -133,15 +133,39 @@
         <button class="btn-soft w-full" id="avito-reset" type="button">Сбросить подключение</button>
       </div>
 
-      <div class="mt-5 space-y-4" id="avito-login-box">
+      <div id="avito-mobile-box" class="mt-5 hidden space-y-4">
+        <div class="rounded-xl border border-sky-500/30 bg-sky-500/10 p-4 space-y-2">
+          <p class="text-sm font-medium">На телефоне — без настройки</p>
+          <p class="hint text-xs">Парсер <strong>не может</strong> сам забрать вход из приложения Avito (ограничение iOS/Android). Звоните так:</p>
+          <ol class="hint list-decimal space-y-1 pl-4 text-xs">
+            <li>Убедитесь, что в <strong>приложении Avito</strong> вы уже вошли в аккаунт</li>
+            <li>На карточке объявления нажмите <strong>«В Avito»</strong></li>
+            <li>В приложении откройте объявление → «Показать телефон» / «Позвонить»</li>
+          </ol>
+        </div>
+        <details class="panel !p-3">
+          <summary class="cursor-pointer text-sm font-medium">Номер прямо в парсере (сложно, Android)</summary>
+          <ol class="hint mt-3 list-decimal space-y-2 pl-4 text-xs">
+            <li>Установите браузер <a href="https://play.google.com/store/apps/details?id=com.kiwibrowser.browser" target="_blank" rel="noopener">Kiwi Browser</a></li>
+            <li>В Kiwi: расширение <a href="https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm" target="_blank" rel="noopener">Cookie-Editor</a></li>
+            <li>Откройте <strong>этот же сайт парсера</strong> в Kiwi (не в Chrome)</li>
+            <li>Войдите на <code>m.avito.ru</code> в Kiwi → Cookie-Editor → Export → JSON</li>
+            <li>Вернитесь на сайт парсера в Kiwi и вставьте JSON ниже</li>
+          </ol>
+          <p class="hint mt-2 text-xs">В Safari/Chrome на iPhone экспорт <code>sessid</code> почти невозможен — используйте «В Avito» на карточке.</p>
+          <textarea id="avito-cookies-mobile" class="field mt-2 min-h-28 font-mono text-xs" placeholder='[{"name":"sessid","value":"..."}]'></textarea>
+          <button class="btn-soft mt-2 w-full" id="avito-import-mobile" type="button">Сохранить cookies</button>
+        </details>
+        <p class="hint min-h-5 text-xs" id="avito-hint-mobile"></p>
+      </div>
+
+      <div class="mt-5 space-y-4" id="avito-desktop-box">
         <ol class="hint list-decimal space-y-2 pl-4 text-xs">
-          <li>Нажмите «Войти в Avito» и авторизуйтесь (телефон + SMS в браузере телефона)</li>
-          <li id="avito-android-hint">В <strong>Kiwi Browser</strong> или <strong>Firefox</strong> установите расширение <a href="https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm" target="_blank" rel="noopener">Cookie-Editor</a></li>
-          <li id="avito-ios-hint" class="hidden">Скопируйте JSON cookies с компьютера (Cookie-Editor в Chrome) или используйте браузер с расширениями на iOS</li>
-          <li>На странице <code>m.avito.ru</code>: Cookie-Editor → Export → JSON</li>
-          <li>Вернитесь в это приложение и вставьте JSON ниже</li>
+          <li>Войдите на <code>avito.ru</code> в Chrome на компьютере</li>
+          <li>Расширение <a href="https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm" target="_blank" rel="noopener">Cookie-Editor</a> → Export → JSON</li>
+          <li>Вставьте JSON ниже и нажмите «Сохранить»</li>
         </ol>
-        <button class="btn-primary w-full" id="avito-open-login" type="button">Войти в Avito</button>
+        <button class="btn-primary w-full" id="avito-open-login" type="button">Открыть avito.ru</button>
         <textarea id="avito-cookies" class="field min-h-32 font-mono text-xs" placeholder='[{"name":"sessid","value":"..."}]'></textarea>
         <button class="btn-soft w-full" id="avito-import" type="button">Сохранить cookies</button>
         <p class="hint min-h-5 text-xs" id="avito-hint"></p>
