@@ -473,7 +473,6 @@ html[data-theme="light"] .toast {
   .search-mode-row {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 0.5rem;
     width: 100%;
     min-width: 0;
@@ -484,23 +483,25 @@ html[data-theme="light"] .toast {
     flex-wrap: wrap;
     gap: 0.5rem;
     min-width: 0;
-    flex: 0 1 auto;
   }
 
   .search-mode-row .chip {
     @apply cursor-pointer;
   }
 
-  .search-mode-row .region-wrap {
-    flex: 0 1 auto;
-    width: auto;
+  .search-form .region-wrap {
+    position: relative;
+    width: 100%;
     min-width: 0;
-    max-width: min(11.5rem, 48%);
-    margin-left: auto;
+    z-index: 3;
   }
 
-  .search-mode-row .region-btn {
-    justify-content: flex-end;
+  .search-form .region-wrap:has(.region-pop.open) {
+    z-index: 40;
+  }
+
+  .search-form .region-btn {
+    justify-content: flex-start;
     width: 100%;
     padding: 0.25rem 0;
     font-size: 0.8125rem;
@@ -823,9 +824,16 @@ html[data-theme="light"] .toast {
       flex: 1 1 100%;
     }
 
-    .search-mode-row .region-btn {
+    .search-form .region-wrap {
+      flex: 1 1 100%;
+      width: 100%;
+    }
+
+    .search-form .region-btn {
       font-size: 0.9375rem;
       padding: 0.375rem 0;
+      justify-content: flex-start;
+      width: 100%;
     }
 
     .search-input-row {
@@ -845,15 +853,6 @@ html[data-theme="light"] .toast {
     .search-field .find {
       padding-inline: 1.5rem;
       font-size: 1rem;
-    }
-
-    .region-wrap {
-      width: auto;
-    }
-
-    .region-btn {
-      justify-content: flex-end;
-      width: auto;
     }
 
     .cat-row {
@@ -913,7 +912,6 @@ html[data-theme="light"] .toast {
 .search-mode-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 0.5rem;
   width: 100%;
   min-width: 0;
@@ -926,25 +924,21 @@ html[data-theme="light"] .toast {
   flex-wrap: wrap;
   gap: 0.5rem;
   min-width: 0;
-  flex: 0 1 auto;
 }
 
-.search-mode-row .region-wrap {
+.search-form .region-wrap {
   position: relative;
-  flex: 0 1 auto;
-  width: auto;
+  width: 100%;
   min-width: 0;
-  max-width: min(11.5rem, 48%);
-  margin-left: auto;
   z-index: 3;
 }
 
-.search-mode-row .region-wrap:has(.region-pop.open) {
+.search-form .region-wrap:has(.region-pop.open) {
   z-index: 40;
 }
 
-.search-mode-row .region-btn {
-  justify-content: flex-end;
+.search-form .region-btn {
+  justify-content: flex-start;
   width: 100%;
   padding: 0.25rem 0;
   font-size: 0.8125rem;
