@@ -932,13 +932,6 @@ def main() -> None:
                     ring.reset_clients()
                 except Exception as rec_err:
                     logger.warning(f"Не удалось сменить IP: {rec_err}")
-            from subscription import is_active
-
-            if not is_active():
-                logger.info("Подписка неактивна, останавливаю мониторинг")
-                from avito_search import stop_search
-                stop_search()
-                break
             state = search_snapshot()
             if not state["running"] or state["generation"] != generation:
                 if not state["running"]:
