@@ -600,7 +600,6 @@ def fetch_page(
 
 
 def rotate_ip(cfg: dict, session: dict | None = None) -> dict | None:
-    logger.warning("Меняю IP")
     change_ip(
         cfg["proxy_change_url"],
         cfg.get("proxy_string") or "",
@@ -725,13 +724,16 @@ def fetch_items(cfg: dict, ring: CookieRing) -> tuple[int, list[dict], bool, boo
         return 0, [], True, False
     logger.info(f"Цикл на cookie id={session.get('id')} [{ring.position()}]")
 
-    def after_ip_change(reason: str) -> curl_requests.Session:
+    def swap_ip(reason: str) -> None:
         logger.warning(reason)
         try:
             rotate_ip(cfg)
         except Exception as err:
             logger.warning(f"Не удалось сменить IP: {err}")
         ring.reset_clients()
+
+    def after_ip_change(reason: str) -> curl_requests.Session:
+        swap_ip(reason)
         return ring.client_for(session)
 
     for page in range(1, pages + 1):
@@ -743,20 +745,19 @@ def fetch_items(cfg: dict, ring: CookieRing) -> tuple[int, list[dict], bool, boo
             status, payload = fetch_page(client, url, timeout=timeout)
 
         if status == 429:
+            # На 135 циклах повтор сразу после смены IP выстрелил лишь 6 раз
+            # из 32: свежий IP мобильного прокси обычно тоже под лимитом.
+            # Дешевле отдать цикл и зайти новым IP через poll_interval.
             throttled = True
-            client = after_ip_change("429: бан по IP, меняю IP, cookie оставляю")
-            status, payload = fetch_page(client, url, timeout=timeout)
+            blocked = True
+            swap_ip("429: бан по IP, меняю IP и жду следующий цикл")
+            break
 
         if status in (403, 439):
             throttled = True
             burned = session.get("id")
-            logger.warning(f"{status}: cookie id={burned} сгорел, меняю IP и беру другой набор")
             ring.burn(burned)
-            try:
-                rotate_ip(cfg)
-            except Exception as err:
-                logger.warning(f"Не удалось сменить IP: {err}")
-            ring.reset_clients()
+            swap_ip(f"{status}: cookie id={burned} сгорел, меняю IP и беру другой набор")
             session, client = ring.next()
             if session is None or client is None:
                 logger.error("Пул не дал готовый набор после блокировки")
@@ -794,7 +795,7 @@ def parse_once(cfg: dict, ring: CookieRing, seen: set[int], first: bool) -> tupl
     status, items, blocked, throttled = fetch_items(cfg, ring)
     if not items:
         if status:
-            logger.error(f"Не удалось получить JSON, status={status}")
+            logger.error(f"Цикл без объявлений, status={status}")
         return [], True, throttled
 
     logger.info(f"Получено объявлений: {len(items)}")
