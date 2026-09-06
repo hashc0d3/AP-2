@@ -22,6 +22,7 @@ SEEN_PATH = STORAGE_DIR / "seen.json"
 SPFA_COOKIES_URL = "https://spfa.pro/api/cookies/mobile/"
 SPFA_UNBLOCK_URL = "https://spfa.pro/api/unblock/"
 PROXY_HOSTS = ("mproxy.site", "fproxy.site", "bproxy.site", "gproxy.site")
+PROXY_PROBE_URL = "https://www.avito.ru/robots.txt"
 _CALL_KEYS = (
     "canCall",
     "can_call",
@@ -51,21 +52,6 @@ def load_config() -> dict:
         return tomllib.load(fh)["avito"]
 
 
-def load_session() -> dict:
-    from cookie_pool import current, wait_ready_cookie
-
-    session = current() or wait_ready_cookie()
-    if not session:
-        raise RuntimeError("Пул cookies пуст — нет готового набора")
-    return session
-
-
-def save_session(session: dict) -> None:
-    from cookie_pool import save_slot
-
-    save_slot(session)
-
-
 def load_seen() -> set[int]:
     if not SEEN_PATH.exists():
         return set()
@@ -75,9 +61,18 @@ def load_seen() -> set[int]:
         return set()
 
 
-def save_seen(seen: set[int]) -> None:
+_seen_saved_at = 0.0
+
+
+def save_seen(seen: set[int], throttle: float = 0.0) -> None:
+    """throttle — не писать на диск чаще, чем раз в столько секунд."""
+    global _seen_saved_at
+    now = time.time()
+    if throttle and now - _seen_saved_at < throttle:
+        return
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
     SEEN_PATH.write_text(json.dumps(sorted(seen)), encoding="utf-8")
+    _seen_saved_at = now
 
 
 def build_client(session: dict, proxy_string: str) -> curl_requests.Session:
@@ -472,7 +467,24 @@ def ensure_proxy_bypasses_vpn() -> None:
             logger.debug(f"Маршрут {ip} уже есть или нет прав: {added.stdout.strip() or added.stderr.strip()}")
 
 
-def change_ip(change_url: str) -> None:
+def proxy_is_live(proxy_string: str, timeout: float = 3.0) -> bool:
+    """Отвечает ли туннель. Любой HTTP-код значит, что прокси уже поднялся."""
+    if not proxy_string:
+        return True
+    proxy_url = f"http://{proxy_string}"
+    try:
+        std_requests.head(
+            PROXY_PROBE_URL,
+            proxies={"http": proxy_url, "https": proxy_url},
+            timeout=timeout,
+        )
+    except std_requests.RequestException:
+        return False
+    return True
+
+
+def change_ip(change_url: str, proxy_string: str = "", wait_max: float = 12.0) -> None:
+    started = time.time()
     logger.info(f"Меняю IP: {change_url.split('?')[0]}")
     try:
         response = std_requests.get(change_url, params={"format": "json"}, timeout=20)
@@ -489,26 +501,36 @@ def change_ip(change_url: str) -> None:
             payload = {}
     new_ip = payload.get("new_ip") if isinstance(payload, dict) else None
     logger.info(f"Новый IP: {new_ip or payload or 'ок'}")
-    time.sleep(8)
+
+    # Ждём ровно до готовности туннеля, а не фиксированную паузу.
+    deadline = started + max(1.0, wait_max)
+    while time.time() < deadline:
+        if proxy_is_live(proxy_string):
+            logger.info(f"Прокси готов через {time.time() - started:.1f} с")
+            return
+        time.sleep(0.3)
+    logger.warning(f"Прокси не ответил за {wait_max:.0f} с после смены IP")
 
 
-def buy_cookies(api_key: str, proxy_string: str) -> dict:
-    from cookie_pool import buy_one, load_config
-
-    return buy_one(load_config())
+def request_timeout(cfg: dict) -> float:
+    return max(3.0, float(cfg.get("request_timeout") or 10))
 
 
-def unblock_cookies(session: dict, api_key: str, proxy_string: str) -> dict | None:
-    from cookie_pool import load_config, unblock_one
+def poll_delay(poll_interval: float, per_cookie_interval: float, cookies: int) -> float:
+    """Лента обновляется не реже poll_interval, один набор бьётся не чаще per_cookie_interval."""
+    return max(poll_interval, per_cookie_interval / max(1, cookies))
 
-    return unblock_one(session, load_config())
 
-
-def fetch_page(client: curl_requests.Session, url: str, attempts: int = 3) -> tuple[int, dict | None]:
+def fetch_page(
+    client: curl_requests.Session,
+    url: str,
+    attempts: int = 2,
+    timeout: float = 10.0,
+) -> tuple[int, dict | None]:
     last_error = None
     for attempt in range(1, attempts + 1):
         try:
-            response = client.get(url, timeout=30)
+            response = client.get(url, timeout=timeout)
             if response.status_code in (403, 429, 439):
                 return response.status_code, None
             response.raise_for_status()
@@ -522,99 +544,176 @@ def fetch_page(client: curl_requests.Session, url: str, attempts: int = 3) -> tu
         except curl_requests.exceptions.RequestException as err:
             last_error = err
             logger.warning(f"Сбой сети ({attempt}/{attempts}): {err}")
-            time.sleep(2 * attempt)
+            if attempt < attempts:
+                time.sleep(0.5)
     raise last_error
 
 
-def rotate_ip(cfg: dict, session: dict) -> dict:
+def rotate_ip(cfg: dict, session: dict | None = None) -> dict | None:
     logger.warning("Меняю IP")
-    change_ip(cfg["proxy_change_url"])
+    change_ip(
+        cfg["proxy_change_url"],
+        cfg.get("proxy_string") or "",
+        wait_max=float(cfg.get("ip_change_wait") or 12),
+    )
     return session
 
 
-def session_is_ready(session: dict | None) -> bool:
-    if not session or not session.get("id"):
-        return False
-    from cookie_pool import load_slot
+class CookieRing:
+    """Готовые cookies с постоянными соединениями: keep-alive и честная ротация.
 
-    fresh = load_slot(session["id"])
-    if not fresh:
-        return False
-    if fresh.get("status") in {"blocked", "dead"}:
-        return False
-    return bool(fresh.get("unblock_ok"))
+    Клиент на каждый набор живёт между циклами, поэтому опрос не платит
+    заново за TCP и TLS через мобильный прокси.
+    """
+
+    REFRESH_EVERY = 30.0
+    CLIENT_MAX_AGE = 300.0
+
+    def __init__(self, cfg: dict) -> None:
+        self._proxy = cfg.get("proxy_string") or ""
+        self._clients: dict[str, curl_requests.Session] = {}
+        self._born: dict[str, float] = {}
+        self._sessions: dict[str, dict] = {}
+        self._order: list[str] = []
+        self._index = 0
+        self._refreshed_at = 0.0
+
+    def refresh(self) -> int:
+        from cookie_pool import usable_slots
+
+        fresh = {str(slot["id"]): slot for slot in usable_slots()}
+        for gone in set(self._clients) - set(fresh):
+            self._close(gone)
+        # Сервис пула мог перевыпустить cookies — тогда клиент держит старые.
+        for key, slot in fresh.items():
+            known = self._sessions.get(key)
+            if known and known.get("last_unblock_at") != slot.get("last_unblock_at"):
+                self._close(key)
+        self._sessions = fresh
+        self._order = sorted(fresh)
+        self._refreshed_at = time.time()
+        if self._index >= len(self._order):
+            self._index = 0
+        return len(self._order)
+
+    def size(self) -> int:
+        return len(self._order)
+
+    def _close(self, cookie_id: str) -> None:
+        self._born.pop(cookie_id, None)
+        client = self._clients.pop(cookie_id, None)
+        if client is None:
+            return
+        try:
+            client.close()
+        except Exception:
+            pass
+
+    def reset_clients(self) -> None:
+        """После смены IP старые соединения мертвы."""
+        for cookie_id in list(self._clients):
+            self._close(cookie_id)
+
+    def burn(self, cookie_id) -> None:
+        from cookie_pool import mark_blocked
+
+        key = str(cookie_id)
+        mark_blocked(cookie_id)
+        self._close(key)
+        self._sessions.pop(key, None)
+        if key in self._order:
+            self._order.remove(key)
+        if self._index >= len(self._order):
+            self._index = 0
+
+    def client_for(self, session: dict) -> curl_requests.Session:
+        key = str(session.get("id"))
+        # Соединение живёт ограниченно: за время работы Avito подмешивает
+        # свои cookies, и набор лучше периодически возвращать к исходному.
+        if time.time() - self._born.get(key, 0.0) > self.CLIENT_MAX_AGE:
+            self._close(key)
+        client = self._clients.get(key)
+        if client is None:
+            client = build_client(session, self._proxy)
+            self._clients[key] = client
+            self._born[key] = time.time()
+        return client
+
+    def next(self) -> tuple[dict | None, curl_requests.Session | None]:
+        stale = time.time() - self._refreshed_at > self.REFRESH_EVERY
+        if not self._order or stale:
+            self.refresh()
+        if not self._order:
+            from cookie_pool import wait_ready_cookie
+
+            wait_ready_cookie()
+            if not self.refresh():
+                return None, None
+        key = self._order[self._index % len(self._order)]
+        self._index = (self._index + 1) % len(self._order)
+        session = self._sessions[key]
+        return session, self.client_for(session)
+
+    def position(self) -> str:
+        total = len(self._order)
+        return f"{self._index or total}/{total}"
 
 
-def refresh_cookies(cfg: dict, session: dict) -> dict:
-    from cookie_pool import mark_blocked, wait_ready_cookie
-
-    current_id = session.get("id")
-    logger.warning(f"403/439: cookie id={current_id} сгорел, меняю IP и беру другой набор")
-    mark_blocked(current_id)
-    try:
-        rotate_ip(cfg, session)
-    except Exception as err:
-        logger.warning(f"Не удалось сменить IP: {err}")
-    nxt = wait_ready_cookie(exclude=current_id)
-    if nxt:
-        return nxt
-    logger.warning("Пул не дал готовый набор, покупаю новый")
-    return buy_cookies(cfg["cookies_api_key"], cfg["proxy_string"])
-
-
-def recover_connection(cfg: dict, session: dict) -> dict:
-    logger.warning("Прокси сбросил соединение, меняю только IP")
-    try:
-        return rotate_ip(cfg, session)
-    except Exception as err:
-        logger.warning(f"Не удалось сменить IP: {err}")
-        return session
-
-
-def fetch_items(cfg: dict, session: dict) -> tuple[dict, int, list[dict], bool]:
-    from cookie_pool import wait_ready_cookie
-
-    if not session_is_ready(session):
-        session = wait_ready_cookie()
-        if not session:
-            logger.error("Нет готового cookie — не бью Avito заблокированным набором")
-            return session, 0, [], True
-
+def fetch_items(cfg: dict, ring: CookieRing) -> tuple[int, list[dict], bool]:
     pages = max(1, int(cfg.get("pages") or 1))
     page_pause = max(0, int(cfg.get("pause_between_pages") or 2))
+    timeout = request_timeout(cfg)
     items: list[dict] = []
     seen_ids: set[int] = set()
     status = 0
     blocked = False
-    client = build_client(session, cfg["proxy_string"])
-    logger.info(f"Цикл на cookie id={session.get('id')}")
+
+    session, client = ring.next()
+    if session is None or client is None:
+        logger.error("Нет готового cookie — не бью Avito заблокированным набором")
+        return 0, [], True
+    logger.info(f"Цикл на cookie id={session.get('id')} [{ring.position()}]")
+
+    def after_ip_change(reason: str) -> curl_requests.Session:
+        logger.warning(reason)
+        try:
+            rotate_ip(cfg)
+        except Exception as err:
+            logger.warning(f"Не удалось сменить IP: {err}")
+        ring.reset_clients()
+        return ring.client_for(session)
 
     for page in range(1, pages + 1):
         url = api_url_for_page(cfg["api_url"], page)
         try:
-            status, payload = fetch_page(client, url)
+            status, payload = fetch_page(client, url, timeout=timeout)
         except curl_requests.exceptions.RequestException:
-            session = recover_connection(cfg, session)
-            client = build_client(session, cfg["proxy_string"])
-            status, payload = fetch_page(client, url)
+            client = after_ip_change("Прокси сбросил соединение, меняю только IP")
+            status, payload = fetch_page(client, url, timeout=timeout)
 
         if status == 429:
-            logger.warning("429: бан по IP, меняю IP, cookie оставляю")
-            session = rotate_ip(cfg, session)
-            client = build_client(session, cfg["proxy_string"])
-            status, payload = fetch_page(client, url)
+            client = after_ip_change("429: бан по IP, меняю IP, cookie оставляю")
+            status, payload = fetch_page(client, url, timeout=timeout)
 
         if status in (403, 439):
-            logger.warning(f"{status}: cookie или IP сгорели")
-            session = refresh_cookies(cfg, session)
-            client = build_client(session, cfg["proxy_string"])
-            status, payload = fetch_page(client, url)
+            burned = session.get("id")
+            logger.warning(f"{status}: cookie id={burned} сгорел, меняю IP и беру другой набор")
+            ring.burn(burned)
+            try:
+                rotate_ip(cfg)
+            except Exception as err:
+                logger.warning(f"Не удалось сменить IP: {err}")
+            ring.reset_clients()
+            session, client = ring.next()
+            if session is None or client is None:
+                logger.error("Пул не дал готовый набор после блокировки")
+                return status, [], True
+            logger.info(f"Продолжаю на cookie id={session.get('id')}")
+            status, payload = fetch_page(client, url, timeout=timeout)
 
         if not payload and status == 200:
-            logger.warning("200 без JSON — антибот или HTML вместо API, меняю IP")
-            session = rotate_ip(cfg, session)
-            client = build_client(session, cfg["proxy_string"])
-            status, payload = fetch_page(client, url)
+            client = after_ip_change("200 без JSON — антибот или HTML вместо API, меняю IP")
+            status, payload = fetch_page(client, url, timeout=timeout)
 
         if not payload:
             logger.error(f"Не удалось получить JSON, status={status}, page={page}")
@@ -633,15 +732,15 @@ def fetch_items(cfg: dict, session: dict) -> tuple[dict, int, list[dict], bool]:
         if page < pages and page_pause:
             time.sleep(page_pause)
 
-    return session, status, items, blocked
+    return status, items, blocked
 
 
-def parse_once(cfg: dict, session: dict, seen: set[int], first: bool) -> tuple[dict, set[int], list, bool]:
-    session, status, items, blocked = fetch_items(cfg, session)
+def parse_once(cfg: dict, ring: CookieRing, seen: set[int], first: bool) -> tuple[set[int], list, bool]:
+    status, items, blocked = fetch_items(cfg, ring)
     if not items:
         if status:
             logger.error(f"Не удалось получить JSON, status={status}")
-        return session, seen, [], True
+        return seen, [], True
 
     logger.info(f"Получено объявлений: {len(items)}")
 
@@ -709,8 +808,8 @@ def parse_once(cfg: dict, session: dict, seen: set[int], first: bool) -> tuple[d
             f"сообщение {sum(m for _, m in flags)}/{len(to_show)}"
         )
 
-    save_seen(seen)
-    return session, seen, to_show, blocked
+    save_seen(seen, throttle=30)
+    return seen, to_show, blocked
 
 
 def main() -> None:
@@ -727,10 +826,25 @@ def main() -> None:
     ensure_proxy_bypasses_vpn()
     start_server(int(cfg.get("web_port") or 8765))
     clear_ads()
-    session = load_session()
-    pause_min = max(3, int(cfg.get("pause_general") or 5))
+
+    ring = CookieRing(cfg)
+    ready = ring.refresh()
+    if not ready:
+        from cookie_pool import wait_ready_cookie
+
+        wait_ready_cookie()
+        ready = ring.refresh()
+
+    # Лента обновляется не реже poll_interval, при этом один набор cookies
+    # бьётся по Avito не чаще, чем раз в per_cookie_interval.
+    poll_interval = max(1.0, float(cfg.get("poll_interval") or 4))
+    per_cookie_interval = max(3.0, float(cfg.get("per_cookie_interval") or cfg.get("pause_general") or 12))
+    retry_pause = max(3.0, float(cfg.get("pause_general") or 5))
     generation = 0
-    logger.info(f"Новая сессия, cookies id={session.get('id')}. Жду «Начать поиск» в веб-интерфейсе")
+    logger.info(
+        f"Готовых cookies: {ready}, интервал опроса от {poll_interval:.0f} с "
+        f"(на набор не чаще {per_cookie_interval:.0f} с). Жду «Начать поиск» в веб-интерфейсе"
+    )
     while True:
         search = wait_for_search(generation)
         generation = int(search["generation"])
@@ -745,8 +859,9 @@ def main() -> None:
         logger.info(f"API URL: {runtime['api_url']}")
         while True:
             blocked = False
+            cycle_started = time.monotonic()
             try:
-                session, seen, shown, blocked = parse_once(runtime, session, seen, first)
+                seen, shown, blocked = parse_once(runtime, ring, seen, first)
                 if shown:
                     publish_ads([serialize_ad(item) for item in shown])
                 first = False
@@ -754,7 +869,8 @@ def main() -> None:
                 blocked = True
                 logger.error(f"Ошибка цикла: {err}")
                 try:
-                    session = rotate_ip(runtime, session)
+                    rotate_ip(runtime)
+                    ring.reset_clients()
                 except Exception as rec_err:
                     logger.warning(f"Не удалось сменить IP: {rec_err}")
             from subscription import is_active
@@ -771,18 +887,16 @@ def main() -> None:
                 else:
                     logger.info("Поисковый запрос обновлён, перезапускаю мониторинг")
                 break
+
+            spent = time.monotonic() - cycle_started
             if blocked:
-                logger.info(f"Запрос не прошёл, пауза {pause_min} сек. перед повтором")
-                if not sleep_or_restart(pause_min, generation):
-                    state = search_snapshot()
-                    if not state["running"]:
-                        logger.info("Мониторинг остановлен, жду новый запуск")
-                    else:
-                        logger.info("Поисковый запрос обновлён, перезапускаю мониторинг")
-                    break
-                continue
-            logger.info(f"Пауза {pause_min} сек.")
-            if not sleep_or_restart(pause_min, generation):
+                wait = max(0.0, retry_pause - spent)
+                logger.info(f"Запрос не прошёл за {spent:.1f} с, пауза {wait:.1f} с перед повтором")
+            else:
+                target = poll_delay(poll_interval, per_cookie_interval, ring.size())
+                wait = max(0.0, target - spent)
+                logger.info(f"Цикл {spent:.1f} с, пауза {wait:.1f} с, наборов {ring.size()}")
+            if wait and not sleep_or_restart(wait, generation):
                 state = search_snapshot()
                 if not state["running"]:
                     logger.info("Мониторинг остановлен, жду новый запуск")

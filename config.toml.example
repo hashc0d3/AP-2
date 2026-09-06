@@ -21,6 +21,12 @@ pages = 1
 pause_between_pages = 2
 title_must_contain = []
 title_skip = ["книга", "книг", "журнал", "комикс", "чехол", "кабель", "зарядк"]
-pause_general = 12
+
+# Скорость опроса
+poll_interval = 4          # как часто обновляем ленту (сек). Меньше — быстрее, но выше риск 429 по IP
+per_cookie_interval = 12   # один набор cookies бьётся по Avito не чаще этого (сек)
+request_timeout = 10       # таймаут запроса к API: зависший запрос не должен держать цикл
+ip_change_wait = 12        # максимум ожидания готовности прокси после смены IP
+pause_general = 12         # пауза после неудачного цикла
 pause_max = 40
 web_port = 8765
