@@ -22,6 +22,38 @@ export function formatLeft(seconds: number): string {
   return `${mins} мин`;
 }
 
+function formatAge(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  if (s < 60) return `${s} сек назад`;
+  const minutes = Math.floor(s / 60);
+  if (minutes < 60) return `${minutes} мин назад`;
+  return `${Math.floor(minutes / 60)} ч назад`;
+}
+
+export function formatAddedAt(ts: number, timeZone: string): string {
+  const addedMs = ts * 1000;
+  const nowMs = Date.now();
+  const seconds = Math.max(0, Math.floor((nowMs - addedMs) / 1000));
+  const age = formatAge(seconds);
+  const clock = new Intl.DateTimeFormat("ru-RU", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(addedMs);
+  if (age) return `${clock} · ${age}`;
+  return new Intl.DateTimeFormat("ru-RU", {
+    timeZone,
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(addedMs);
+}
+
 export function imgSrc(url: string): string {
   return "/img?u=" + encodeURIComponent(url);
 }

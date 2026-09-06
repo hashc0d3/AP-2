@@ -103,4 +103,5 @@ export type Ad = {
   can_message: boolean;
   seller?: string;
   published?: string;
+  ts?: number;
 };

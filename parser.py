@@ -10,6 +10,10 @@ import time
 from pathlib import Path
 from datetime import datetime, timezone
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from zoneinfo import ZoneInfo
+
+from avito_search import snapshot as search_snapshot
+from region_timezones import region_timezone
 
 import requests as std_requests
 import tomllib
@@ -160,6 +164,18 @@ def format_age(seconds: int | None) -> str:
     if minutes < 60:
         return f"{minutes} мин назад"
     return f"{minutes // 60} ч назад"
+
+
+def format_added_at(ts: int, tz_name: str) -> str:
+    now = datetime.now(timezone.utc)
+    added = datetime.fromtimestamp(ts, tz=timezone.utc)
+    seconds = max(0, int((now - added).total_seconds()))
+    age = format_age(seconds)
+    local = added.astimezone(ZoneInfo(tz_name))
+    clock = local.strftime("%H:%M:%S")
+    if age:
+        return f"{clock} · {age}"
+    return local.strftime("%d.%m.%Y %H:%M")
 
 
 def title_matches(item: dict, must_contain: list, skip: list) -> bool:
@@ -383,13 +399,9 @@ def serialize_ad(item: dict) -> dict:
     _image_urls(item.get("gallery"), images)
     _image_urls(item.get("images"), images)
     can_call, can_message = contact_flags(item)
-    published = published_at(item)
-    age = age_seconds(item)
-    published_text = format_age(age)
-    if published and not published_text:
-        published_text = published.astimezone().strftime("%d.%m.%Y %H:%M")
-    elif published:
-        published_text = f"{published.astimezone().strftime('%H:%M:%S')} · {published_text}"
+    added_ts = int(time.time())
+    region_slug = search_snapshot().get("region", {}).get("slug", "all")
+    published_text = format_added_at(added_ts, region_timezone(region_slug))
     seller = seller_name(item)
     return {
         "id": item.get("id"),
@@ -403,7 +415,7 @@ def serialize_ad(item: dict) -> dict:
         "can_message": can_message,
         "seller": seller,
         "published": published_text,
-        "ts": int(time.time()),
+        "ts": added_ts,
     }
 
 

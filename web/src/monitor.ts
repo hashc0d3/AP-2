@@ -3,7 +3,8 @@ import { openMessenger, itemWebUrl } from "./avito-links";
 import { ICON_CLOSE, ICON_EXT, ICON_MSG, ICON_PHONE, ICON_STAR, ICON_STAR_OUTLINE } from "./card-icons";
 import { isFavorite, toggleFavorite } from "./favorites";
 import { notifyNewAds } from "./push-notify";
-import { displayPrice, escapeHtml, imgSrc } from "./format";
+import { displayPrice, escapeHtml, formatAddedAt, imgSrc } from "./format";
+import { regionTimezone } from "./region-timezones";
 import {
   addSellerToBlacklist,
   BLACKLIST_EVENT,
@@ -299,6 +300,22 @@ export function mountMonitor(opts: {
     }
   };
 
+  const addedTimeText = (ad: Ad): string => {
+    if (ad.ts) return formatAddedAt(ad.ts, regionTimezone(region.slug));
+    return ad.published || "";
+  };
+
+  const refreshCardTimes = () => {
+    const tz = regionTimezone(region.slug);
+    feed.querySelectorAll<HTMLElement>(".card-meta[data-ts]").forEach((el) => {
+      const ts = Number(el.dataset.ts);
+      if (!ts) return;
+      const address = el.dataset.address || "";
+      const added = formatAddedAt(ts, tz);
+      el.textContent = [added, address].filter(Boolean).join(" · ");
+    });
+  };
+
   const cardHtml = (ad: Ad): string => {
     const id = String(ad.id);
     const web = itemWebUrl(ad);
@@ -307,7 +324,12 @@ export function mountMonitor(opts: {
     const gallery = photo
       ? `<img src="${imgSrc(photo)}" alt="" loading="lazy" />`
       : `<div class="ph">нет фото</div>`;
-    const meta = [ad.published, ad.address].filter(Boolean).join(" · ");
+    const addedText = addedTimeText(ad);
+    const meta = [addedText, ad.address].filter(Boolean).join(" · ");
+    const metaAttrs = [
+      ad.ts ? ` data-ts="${ad.ts}"` : "",
+      ad.address ? ` data-address="${escapeHtml(ad.address)}"` : "",
+    ].join("");
     const sellerHtml = ad.seller
       ? `<div class="card-seller-row">
           <span class="card-seller">Продавец: ${escapeHtml(ad.seller)}</span>
@@ -331,7 +353,7 @@ export function mountMonitor(opts: {
           </button>
         </div>
         <a class="card-title" href="${escapeHtml(web)}" target="_blank" rel="noopener">${escapeHtml(ad.title || "")}</a>
-        ${meta ? `<div class="card-meta">${escapeHtml(meta)}</div>` : ""}
+        ${meta ? `<div class="card-meta"${metaAttrs}>${escapeHtml(meta)}</div>` : ""}
         ${sellerHtml}
         <div class="card-actions">
           <button class="card-btn call${ad.can_call ? "" : " muted"}" type="button" data-action="call">
@@ -633,6 +655,7 @@ export function mountMonitor(opts: {
       if (data.region) {
         region = data.region;
         regionLabel.textContent = region.name;
+        refreshCardTimes();
       }
       if (data.category) {
         category = data.category;
@@ -765,6 +788,7 @@ export function mountMonitor(opts: {
       regionLabel.textContent = region.name;
       regionPop.classList.remove("open");
       regionQuery.value = "";
+      refreshCardTimes();
       saveCache();
     });
     document.addEventListener("click", (ev) => {
@@ -818,6 +842,7 @@ export function mountMonitor(opts: {
     setInterval(() => {
       if (monitoring) void api.ads().then((ads) => addBatch(ads, false)).catch(() => undefined);
     }, 4000);
+    setInterval(refreshCardTimes, 30_000);
     try {
       const data = await api.status();
       if (data.running) {
@@ -832,6 +857,7 @@ export function mountMonitor(opts: {
         if (data.region?.slug) {
           region = data.region;
           regionLabel.textContent = region.name;
+          refreshCardTimes();
         }
         if (data.category?.id) {
           category = data.category;
