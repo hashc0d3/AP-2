@@ -521,6 +521,56 @@ def poll_delay(poll_interval: float, per_cookie_interval: float, cookies: int) -
     return max(poll_interval, per_cookie_interval / max(1, cookies))
 
 
+class PollPacer:
+    """Держит быстрый опрос, но тормозит, если Avito отбивается подряд.
+
+    Замеры показали, что доля 429 одинакова и на 15 с, и на 4 с между
+    циклами (~22%): это свойство пула IP мобильного прокси, а не нашей
+    частоты, и отступать на каждый 429 бессмысленно — потеряем скорость,
+    не выиграв ничего. Поэтому тормозим только на серии отказов подряд:
+    так одиночный 429 не мешает, а реальный бан не даёт долбить впустую.
+    """
+
+    THROTTLE_STREAK = 3  # столько отказов подряд считаем баном, а не шумом
+    CLEAN_STREAK = 3  # столько чистых циклов до возврата к скорости
+    STEP_UP = 1.6  # во сколько раз замедляемся при бане
+    STEP_DOWN = 2.0  # во сколько раз ускоряемся при выходе из бана
+
+    def __init__(self, floor: float, ceiling: float) -> None:
+        self._floor = max(1.0, floor)
+        self._ceiling = max(self._floor, ceiling)
+        self._interval = self._floor
+        self._clean = 0
+        self._throttled = 0
+
+    @property
+    def interval(self) -> float:
+        return self._interval
+
+    def on_ok(self) -> None:
+        self._throttled = 0
+        if self._interval <= self._floor:
+            return
+        self._clean += 1
+        if self._clean < self.CLEAN_STREAK:
+            return
+        self._interval = max(self._floor, self._interval / self.STEP_DOWN)
+        self._clean = 0
+        logger.info(f"Avito снова отвечает — возвращаю опрос к {self._interval:.1f} с")
+
+    def on_throttle(self) -> None:
+        self._clean = 0
+        self._throttled += 1
+        if self._throttled < self.THROTTLE_STREAK or self._interval >= self._ceiling:
+            return
+        self._interval = min(self._ceiling, self._interval * self.STEP_UP)
+        self._throttled = 0
+        logger.warning(
+            f"{self.THROTTLE_STREAK} отказа подряд — похоже на бан, замедляю опрос "
+            f"до {self._interval:.1f} с"
+        )
+
+
 def fetch_page(
     client: curl_requests.Session,
     url: str,
@@ -659,7 +709,7 @@ class CookieRing:
         return f"{self._index or total}/{total}"
 
 
-def fetch_items(cfg: dict, ring: CookieRing) -> tuple[int, list[dict], bool]:
+def fetch_items(cfg: dict, ring: CookieRing) -> tuple[int, list[dict], bool, bool]:
     pages = max(1, int(cfg.get("pages") or 1))
     page_pause = max(0, int(cfg.get("pause_between_pages") or 2))
     timeout = request_timeout(cfg)
@@ -667,11 +717,12 @@ def fetch_items(cfg: dict, ring: CookieRing) -> tuple[int, list[dict], bool]:
     seen_ids: set[int] = set()
     status = 0
     blocked = False
+    throttled = False
 
     session, client = ring.next()
     if session is None or client is None:
         logger.error("Нет готового cookie — не бью Avito заблокированным набором")
-        return 0, [], True
+        return 0, [], True, False
     logger.info(f"Цикл на cookie id={session.get('id')} [{ring.position()}]")
 
     def after_ip_change(reason: str) -> curl_requests.Session:
@@ -692,10 +743,12 @@ def fetch_items(cfg: dict, ring: CookieRing) -> tuple[int, list[dict], bool]:
             status, payload = fetch_page(client, url, timeout=timeout)
 
         if status == 429:
+            throttled = True
             client = after_ip_change("429: бан по IP, меняю IP, cookie оставляю")
             status, payload = fetch_page(client, url, timeout=timeout)
 
         if status in (403, 439):
+            throttled = True
             burned = session.get("id")
             logger.warning(f"{status}: cookie id={burned} сгорел, меняю IP и беру другой набор")
             ring.burn(burned)
@@ -707,11 +760,12 @@ def fetch_items(cfg: dict, ring: CookieRing) -> tuple[int, list[dict], bool]:
             session, client = ring.next()
             if session is None or client is None:
                 logger.error("Пул не дал готовый набор после блокировки")
-                return status, [], True
+                return status, [], True, throttled
             logger.info(f"Продолжаю на cookie id={session.get('id')}")
             status, payload = fetch_page(client, url, timeout=timeout)
 
         if not payload and status == 200:
+            throttled = True
             client = after_ip_change("200 без JSON — антибот или HTML вместо API, меняю IP")
             status, payload = fetch_page(client, url, timeout=timeout)
 
@@ -732,15 +786,16 @@ def fetch_items(cfg: dict, ring: CookieRing) -> tuple[int, list[dict], bool]:
         if page < pages and page_pause:
             time.sleep(page_pause)
 
-    return status, items, blocked
+    return status, items, blocked, throttled
 
 
-def parse_once(cfg: dict, ring: CookieRing, seen: set[int], first: bool) -> tuple[set[int], list, bool]:
-    status, items, blocked = fetch_items(cfg, ring)
+def parse_once(cfg: dict, ring: CookieRing, seen: set[int], first: bool) -> tuple[list, bool, bool]:
+    """Возвращает (что показать, цикл провалился, Avito ограничивает). seen меняется на месте."""
+    status, items, blocked, throttled = fetch_items(cfg, ring)
     if not items:
         if status:
             logger.error(f"Не удалось получить JSON, status={status}")
-        return seen, [], True
+        return [], True, throttled
 
     logger.info(f"Получено объявлений: {len(items)}")
 
@@ -809,7 +864,7 @@ def parse_once(cfg: dict, ring: CookieRing, seen: set[int], first: bool) -> tupl
         )
 
     save_seen(seen, throttle=30)
-    return seen, to_show, blocked
+    return to_show, blocked, throttled
 
 
 def main() -> None:
@@ -835,15 +890,17 @@ def main() -> None:
         wait_ready_cookie()
         ready = ring.refresh()
 
-    # Лента обновляется не реже poll_interval, при этом один набор cookies
-    # бьётся по Avito не чаще, чем раз в per_cookie_interval.
+    # Работаем на poll_interval, при серии отказов откатываемся к poll_interval_max.
     poll_interval = max(1.0, float(cfg.get("poll_interval") or 4))
     per_cookie_interval = max(3.0, float(cfg.get("per_cookie_interval") or cfg.get("pause_general") or 12))
+    poll_interval_max = max(poll_interval, float(cfg.get("poll_interval_max") or 24))
     retry_pause = max(3.0, float(cfg.get("pause_general") or 5))
+    pacer = PollPacer(poll_interval, poll_interval_max)
     generation = 0
     logger.info(
-        f"Готовых cookies: {ready}, интервал опроса от {poll_interval:.0f} с "
-        f"(на набор не чаще {per_cookie_interval:.0f} с). Жду «Начать поиск» в веб-интерфейсе"
+        f"Готовых cookies: {ready}, опрос от {poll_interval:.0f} с "
+        f"(на набор не чаще {per_cookie_interval:.0f} с, откат при банах до {poll_interval_max:.0f} с). "
+        f"Жду «Начать поиск» в веб-интерфейсе"
     )
     while True:
         search = wait_for_search(generation)
@@ -859,9 +916,10 @@ def main() -> None:
         logger.info(f"API URL: {runtime['api_url']}")
         while True:
             blocked = False
+            throttled = False
             cycle_started = time.monotonic()
             try:
-                seen, shown, blocked = parse_once(runtime, ring, seen, first)
+                shown, blocked, throttled = parse_once(runtime, ring, seen, first)
                 if shown:
                     publish_ads([serialize_ad(item) for item in shown])
                 first = False
@@ -889,13 +947,18 @@ def main() -> None:
                 break
 
             spent = time.monotonic() - cycle_started
-            if blocked:
-                wait = max(0.0, retry_pause - spent)
-                logger.info(f"Запрос не прошёл за {spent:.1f} с, пауза {wait:.1f} с перед повтором")
+            if blocked or throttled:
+                pacer.on_throttle()
             else:
-                target = poll_delay(poll_interval, per_cookie_interval, ring.size())
-                wait = max(0.0, target - spent)
-                logger.info(f"Цикл {spent:.1f} с, пауза {wait:.1f} с, наборов {ring.size()}")
+                pacer.on_ok()
+            target = poll_delay(pacer.interval, per_cookie_interval, ring.size())
+            if blocked:
+                target = max(target, retry_pause)
+            wait = max(0.0, target - spent)
+            logger.info(
+                f"Цикл {spent:.1f} с, пауза {wait:.1f} с, темп {pacer.interval:.1f} с, "
+                f"наборов {ring.size()}"
+            )
             if wait and not sleep_or_restart(wait, generation):
                 state = search_snapshot()
                 if not state["running"]:

@@ -195,7 +195,7 @@ def stamp(line: str) -> float | None:
     return datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S.%f").timestamp()
 
 
-def log_report(path: str) -> None:
+def log_report(path: str, since: str = "") -> None:
     """Разбор лога: период цикла, длительность запроса, сбои, возраст объявлений."""
     file = Path(path)
     print(f"\n=== Разбор лога {file} ===")
@@ -204,6 +204,14 @@ def log_report(path: str) -> None:
         return
 
     lines = file.read_text(encoding="utf-8", errors="replace").splitlines()
+    if since:
+        # Лог пишется в один файл несколько дней подряд, иначе прошлые
+        # запуски смешаются с текущим и медианы будут ни о чём.
+        lines = [line for line in lines if line[: len(since)] >= since]
+        print(f"  только записи с {since}: строк {len(lines)}")
+        if not lines:
+            print("  за этот период записей нет")
+            return
 
     cycle_starts: list[float] = []
     request_times: list[float] = []
@@ -272,6 +280,7 @@ def main() -> None:
     parser.add_argument("--api", type=int, metavar="N", help="замерить запросы к API Avito")
     parser.add_argument("--ipchange", action="store_true", help="замерить смену IP")
     parser.add_argument("--log", metavar="PATH", help="разобрать лог парсера")
+    parser.add_argument("--since", metavar="YYYY-MM-DD", default="", help="учитывать записи с этой даты")
     args = parser.parse_args()
 
     if not any([args.probe, args.api, args.ipchange, args.log]):
@@ -286,7 +295,7 @@ def main() -> None:
     if args.ipchange:
         ipchange(cfg)
     if args.log:
-        log_report(args.log)
+        log_report(args.log, args.since)
 
 
 if __name__ == "__main__":

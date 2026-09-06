@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 import cookie_pool
-from parser import CookieRing, poll_delay
+from parser import CookieRing, PollPacer, poll_delay
 
 CFG = {"proxy_string": "", "cookies_api_key": "test"}
 
@@ -145,6 +145,46 @@ def test_poll_delay() -> None:
     print("  интервал опроса считается верно: ок")
 
 
+def test_pacer_ignores_single_throttles() -> None:
+    """Одиночные 429 — фон мобильного прокси, скорость из-за них терять нельзя."""
+    pacer = PollPacer(floor=4, ceiling=24)
+    for _ in range(30):
+        for _ in range(PollPacer.THROTTLE_STREAK - 1):
+            pacer.on_throttle()
+        pacer.on_ok()
+    assert pacer.interval == 4, "разрозненные 429 не должны замедлять опрос"
+    print("  одиночные 429 не сбивают темп: ок")
+
+
+def test_pacer_backs_off_on_ban() -> None:
+    pacer = PollPacer(floor=4, ceiling=24)
+    for _ in range(PollPacer.THROTTLE_STREAK - 1):
+        pacer.on_throttle()
+    assert pacer.interval == 4, "тормозить раньше серии отказов рано"
+    pacer.on_throttle()
+    assert pacer.interval > 4, "серия отказов подряд должна замедлить опрос"
+    for _ in range(100):
+        pacer.on_throttle()
+    assert pacer.interval == 24, "замедление не должно уходить за потолок"
+    print("  серия отказов тормозит опрос и не уходит за потолок: ок")
+
+
+def test_pacer_returns_to_speed() -> None:
+    pacer = PollPacer(floor=4, ceiling=24)
+    for _ in range(PollPacer.THROTTLE_STREAK):
+        pacer.on_throttle()
+    banned = pacer.interval
+    for _ in range(PollPacer.CLEAN_STREAK - 1):
+        pacer.on_ok()
+    assert pacer.interval == banned, "возвращаться к скорости до серии чистых циклов рано"
+    pacer.on_ok()
+    assert pacer.interval < banned, "после чистых циклов опрос должен снова ускориться"
+    for _ in range(100):
+        pacer.on_ok()
+    assert pacer.interval == 4, "ускорение не должно пробивать пол"
+    print("  выход из бана возвращает скорость и не пробивает пол: ок")
+
+
 def main() -> None:
     tests = [
         test_rotation_is_round_robin,
@@ -153,6 +193,9 @@ def main() -> None:
         test_client_rebuilt_after_unblock,
         test_empty_pool_is_reported,
         test_poll_delay,
+        test_pacer_ignores_single_throttles,
+        test_pacer_backs_off_on_ban,
+        test_pacer_returns_to_speed,
     ]
     print("Проверки парсера:")
     for test in tests:
