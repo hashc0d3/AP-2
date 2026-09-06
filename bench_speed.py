@@ -280,7 +280,12 @@ def main() -> None:
     parser.add_argument("--api", type=int, metavar="N", help="замерить запросы к API Avito")
     parser.add_argument("--ipchange", action="store_true", help="замерить смену IP")
     parser.add_argument("--log", metavar="PATH", help="разобрать лог парсера")
-    parser.add_argument("--since", metavar="YYYY-MM-DD", default="", help="учитывать записи с этой даты")
+    parser.add_argument(
+        "--since",
+        metavar="'YYYY-MM-DD HH:MM'",
+        default="",
+        help="учитывать записи с этого момента: можно только дату, можно с временем",
+    )
     args = parser.parse_args()
 
     if not any([args.probe, args.api, args.ipchange, args.log]):
