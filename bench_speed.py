@@ -170,6 +170,7 @@ def ipchange(cfg: dict) -> None:
 
 
 AGE_RE = re.compile(r"Новых объявлений: (\d+), (\d+)[–-](\d+) сек")
+IP_RE = re.compile(r"Новый IP: (\d+\.\d+\.\d+\.\d+)")
 TS_RE = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+)")
 CYCLE_RE = re.compile(r"Цикл на cookie id=(\S+)")
 GOT_RE = re.compile(r"Получено объявлений: (\d+)")
@@ -216,6 +217,7 @@ def log_report(path: str, since: str = "") -> None:
 
     cycle_starts: list[float] = []
     request_times: list[float] = []
+    proxy_ips: list[str] = []
     ages_min: list[float] = []
     ages_max: list[float] = []
     ads_total = 0
@@ -237,6 +239,9 @@ def log_report(path: str, since: str = "") -> None:
             ads_total += int(match.group(1))
             ages_min.append(float(match.group(2)))
             ages_max.append(float(match.group(3)))
+        match = IP_RE.search(line)
+        if match:
+            proxy_ips.append(match.group(1))
         for name, needle in EVENTS.items():
             if needle in line:
                 counters[name] += 1
@@ -262,6 +267,21 @@ def log_report(path: str, since: str = "") -> None:
             print(f"    {name}: {count} раз ({share:.1f}% циклов)")
     if not any_event:
         print("    не зафиксировано")
+
+    if proxy_ips:
+        # Avito считает лимит по подсети, а не по отдельному адресу, поэтому
+        # ротация внутри одного /21 счётчик не сбрасывает: смотрим, из
+        # скольких разных подсетей прокси реально выдал адреса.
+        blocks = {".".join(ip.split(".")[:2]) + f".{int(ip.split('.')[2]) // 8 * 8}.0/21" for ip in proxy_ips}
+        print("\n  Адреса от прокси:")
+        print(f"    смен IP: {len(proxy_ips)}, уникальных адресов: {len(set(proxy_ips))}")
+        print(f"    подсетей /21: {len(blocks)} — {', '.join(sorted(blocks))}")
+        if len(blocks) == 1:
+            per_ip = len(cycle_starts) / max(1, len(proxy_ips))
+            print(
+                f"    все адреса из одной подсети: смена IP лимит Avito не сбрасывает "
+                f"(в среднем {per_ip:.1f} запроса на адрес)"
+            )
 
     print("\n  Возраст объявлений в момент попадания в ленту:")
     if not ages_min:
