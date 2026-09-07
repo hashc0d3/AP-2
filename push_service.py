@@ -26,6 +26,18 @@ def _normalize_pem(raw: str) -> str:
     return text
 
 
+def _private_pem() -> str | None:
+    pem = ""
+    if VAPID_PRIVATE_PATH.is_file():
+        pem = VAPID_PRIVATE_PATH.read_text(encoding="utf-8")
+    elif os.environ.get("VAPID_PRIVATE_KEY", "").strip():
+        pem = os.environ.get("VAPID_PRIVATE_KEY", "")
+    pem = _normalize_pem(pem)
+    if pem and "BEGIN PRIVATE KEY" in pem:
+        return pem
+    return None
+
+
 def _load_vapid() -> object | None:
     try:
         from py_vapid import Vapid02
@@ -33,17 +45,13 @@ def _load_vapid() -> object | None:
         logger.warning("py-vapid не установлен")
         return None
 
-    pem = ""
-    if VAPID_PRIVATE_PATH.is_file():
-        pem = VAPID_PRIVATE_PATH.read_text(encoding="utf-8")
-    elif os.environ.get("VAPID_PRIVATE_KEY", "").strip():
-        pem = os.environ.get("VAPID_PRIVATE_KEY", "")
-
-    pem = _normalize_pem(pem)
-    if not pem or "BEGIN PRIVATE KEY" not in pem:
+    pem = _private_pem()
+    if not pem:
         return None
 
     try:
+        from py_vapid import Vapid02
+
         vapid = Vapid02()
         vapid.from_pem(pem.encode("utf-8"))
         return vapid
@@ -80,7 +88,7 @@ def vapid_public_key() -> str | None:
 
 
 def is_configured() -> bool:
-    return _load_vapid() is not None and bool(vapid_public_key())
+    return _private_pem() is not None and bool(vapid_public_key())
 
 
 def _vapid_claims() -> dict[str, str]:
@@ -149,8 +157,8 @@ def _format_payload(ads: list[dict]) -> str:
 
 
 def _send_all(payload: str) -> None:
-    vapid = _load_vapid()
-    if not vapid:
+    private_pem = _private_pem()
+    if not private_pem:
         logger.warning("Push: VAPID не настроен — уведомление не отправлено")
         return
 
