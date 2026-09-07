@@ -88,6 +88,16 @@ def _allowed_image(url: str) -> bool:
     return host.endswith("avito.st") or host.endswith("avito.ru") or "img.avito" in host
 
 
+_LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _allowed_hosts() -> frozenset[str] | None:
+    raw = os.environ.get("ALLOWED_HOST", "").strip()
+    if not raw:
+        return None
+    return frozenset(part.strip().lower() for part in raw.split(",") if part.strip())
+
+
 class QuietServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = False
@@ -142,6 +152,18 @@ class Handler(BaseHTTPRequestHandler):
         self._json(403, {"error": "Требуется вход", "code": "auth_required"})
         return False
 
+    def _reject_foreign_host(self) -> bool:
+        allowed = _allowed_hosts()
+        if not allowed:
+            return False
+        host = (self.headers.get("Host") or "").split(":")[0].lower()
+        if host in _LOCAL_HOSTS:
+            return False
+        if host not in allowed:
+            self.send_error(403)
+            return True
+        return False
+
     def _serve_static(self, rel: str) -> bool:
         path = (STATIC_DIR / rel).resolve()
         if STATIC_DIR.resolve() not in path.parents and path != STATIC_DIR.resolve():
@@ -172,6 +194,8 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def do_GET(self) -> None:  # noqa: N802
+        if self._reject_foreign_host():
+            return
         parsed = urlparse(self.path)
         if parsed.path in {"/", "/index.html"}:
             if not self._serve_static("index.html"):
@@ -343,6 +367,8 @@ class Handler(BaseHTTPRequestHandler):
         return data if isinstance(data, dict) else {}
 
     def do_POST(self) -> None:  # noqa: N802
+        if self._reject_foreign_host():
+            return
         parsed = urlparse(self.path)
         if parsed.path == "/api/auth/login":
             try:

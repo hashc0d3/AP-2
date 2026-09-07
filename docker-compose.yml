@@ -7,7 +7,7 @@ services:
     env_file:
       - .env
     ports:
-      - "${WEB_PORT:-8765}:8765"
+      - "127.0.0.1:${WEB_PORT:-8765}:8765"
     environment:
       WEB_HOST: "0.0.0.0"
       WEB_OPEN_BROWSER: "0"
