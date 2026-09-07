@@ -106,6 +106,16 @@ function urlBase64ToUint8Array(base64: string): Uint8Array {
   return out;
 }
 
+function keyBytesEqual(a: ArrayBuffer | null | undefined, b: Uint8Array): boolean {
+  if (!a) return false;
+  const left = new Uint8Array(a);
+  if (left.length !== b.length) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    if (left[i] !== b[i]) return false;
+  }
+  return true;
+}
+
 let swRegistration: ServiceWorkerRegistration | null = null;
 
 async function ensureServiceWorker(): Promise<ServiceWorkerRegistration | null> {
@@ -167,11 +177,23 @@ export async function subscribeWebPush(): Promise<boolean> {
   const registration = await ensureServiceWorker();
   if (!registration) return false;
 
+  const applicationServerKey = urlBase64ToUint8Array(publicKey);
   let subscription = await registration.pushManager.getSubscription();
+  if (subscription) {
+    const boundKey = subscription.options?.applicationServerKey;
+    if (!keyBytesEqual(boundKey, applicationServerKey)) {
+      try {
+        await subscription.unsubscribe();
+      } catch {
+        /* empty */
+      }
+      subscription = null;
+    }
+  }
   if (!subscription) {
     subscription = await registration.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(publicKey) as BufferSource,
+      applicationServerKey: applicationServerKey as BufferSource,
     });
   }
 
