@@ -1,3 +1,4 @@
+import { initPushServiceWorker } from "./push-notify";
 import { initTheme } from "./theme";
 import { api } from "./api";
 import { mountMonitor } from "./monitor";
@@ -5,6 +6,7 @@ import { mountUserMenu } from "./user-menu";
 import "./styles.css";
 
 initTheme();
+void initPushServiceWorker();
 
 let monitorRef: ReturnType<typeof mountMonitor> | null = null;
 

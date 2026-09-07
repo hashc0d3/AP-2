@@ -2,7 +2,6 @@ import { api } from "./api";
 import { itemWebUrl } from "./avito-links";
 import { ICON_CLOSE, ICON_EXT, ICON_PHONE, ICON_STAR, ICON_STAR_OUTLINE } from "./card-icons";
 import { isFavorite, toggleFavorite } from "./favorites";
-import { notifyNewAds } from "./push-notify";
 import { collapseDescText, displayPrice, escapeHtml, formatAddedAt, imgSrc } from "./format";
 import { openImageLightbox } from "./image-lightbox";
 import { regionTimezone } from "./region-timezones";
@@ -669,17 +668,12 @@ export function mountMonitor(opts: {
     }
     feed.querySelector(".empty")?.remove();
     const marker = feed.firstChild;
-    const freshAds: Ad[] = [];
     ads.forEach((ad) => {
       const el = mount(ad, fresh);
       if (el) {
         feed.insertBefore(el, marker);
-        if (fresh) freshAds.push(ad);
       }
     });
-    if (fresh && freshAds.length && opts.isPushEnabled?.()) {
-      notifyNewAds(freshAds);
-    }
     syncFeedEmpty();
     setStatus("онлайн · " + seen.size, true);
   };

@@ -1,6 +1,6 @@
 import { api } from "./api";
 import { isLightTheme, setLightTheme } from "./theme";
-import { canUsePush, hasNotificationApi, pushBlockReason, pushEnableHint, pushPermission, pushStatusLine, requestPushPermission, showTestNotification } from "./push-notify";
+import { canUsePush, disableWebPush, enableWebPush, hasNotificationApi, initPushServiceWorker, pushBlockReason, pushEnableHint, pushPermission, pushStatusLine, pwaInstallHint, subscribeWebPush } from "./push-notify";
 import {
   addSellerToBlacklist,
   BLACKLIST_EVENT,
@@ -136,32 +136,17 @@ export function mountUserMenu(opts: UserMenuOptions): {
       return false;
     }
 
-    if (Notification.permission === "granted") {
-      savePush(true);
-      pushCheck.checked = true;
-      showTestNotification();
-      syncPushUi();
-      showToast("Уведомления включены", "success");
-      return true;
-    }
-
-    const granted = await requestPushPermission();
-    if (!granted) {
-      pushCheck.checked = false;
-      savePush(false);
-      syncPushUi();
-      showToast(pushEnableHint(pushBlockReason()), "error");
+    const result = await enableWebPush();
+    if (!result.ok) {
+      showToast(pushEnableHint(result.reason || pushBlockReason()), "error");
       return false;
     }
 
     savePush(true);
     pushCheck.checked = true;
     syncPushUi();
-    if (showTestNotification()) {
-      showToast("Уведомления включены", "success");
-    } else {
-      showToast("Разрешение получено, но тестовое уведомление не показалось", "info");
-    }
+    const pwaHint = pwaInstallHint();
+    showToast(pwaHint || "Уведомления включены", pwaHint ? "info" : "success");
     return true;
   };
 
@@ -177,7 +162,12 @@ export function mountUserMenu(opts: UserMenuOptions): {
     }
 
     pushCheck.disabled = false;
-    pushStatus.textContent = pushStatusLine();
+    let status = pushStatusLine();
+    const pwaHint = pwaInstallHint();
+    if (pwaHint && pushEnabled && Notification.permission === "granted") {
+      status = pwaHint;
+    }
+    pushStatus.textContent = status;
     pushStatus.classList.toggle("is-error", !canUsePush() || Notification.permission === "denied");
 
     const canRequest = canUsePush() && Notification.permission === "default";
@@ -220,6 +210,9 @@ export function mountUserMenu(opts: UserMenuOptions): {
       pushEnabled = false;
     }
     syncPushUi();
+    if (pushEnabled && Notification.permission === "granted") {
+      void subscribeWebPush().catch(() => undefined);
+    }
   };
 
   const savePush = (on: boolean) => {
@@ -292,6 +285,7 @@ export function mountUserMenu(opts: UserMenuOptions): {
   pushCheck.addEventListener("change", async () => {
     if (!pushCheck.checked) {
       savePush(false);
+      await disableWebPush();
       syncPushUi();
       return;
     }
@@ -353,6 +347,7 @@ export function mountUserMenu(opts: UserMenuOptions): {
   });
 
   loadPush();
+  void initPushServiceWorker();
 
   return {
     setUsername,

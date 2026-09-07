@@ -151,6 +151,21 @@ Nginx-конфиг: `deploy/nginx/peterparser.ru.conf` → `/opt/infra-proxy/con
 
 Откройте: **https://peterparser.ru**
 
+**6. Web Push (фоновые уведомления на телефоне):**
+
+```bash
+pip install pywebpush py-vapid
+python tools/generate_vapid.py
+```
+
+Скопируйте ключи в `.env`, пересоберите контейнер:
+
+```bash
+docker compose up -d --build
+```
+
+В меню включите «Push о новых объявлениях». На **iPhone** добавьте сайт **«На экран Домой»** (Safari → Поделиться) — иначе push только при открытой вкладке.
+
 ---
 
 ### Общий шаблон nginx

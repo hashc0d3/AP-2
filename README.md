@@ -93,6 +93,15 @@ python tests/test_parser_speed.py
 | `WEB_OPEN_BROWSER` | Открывать браузер при старте (1/0) |
 | `SKIP_VPN_BYPASS` | Не настраивать Windows-маршруты VPN (1/0) |
 
+## Push-уведомления (фоновые)
+
+1. На сервере сгенерируйте VAPID-ключи: `python tools/generate_vapid.py` → добавьте в `.env`
+2. Откройте **https://peterparser.ru**, войдите, меню → «Push о новых объявлениях»
+3. **Android Chrome** — push приходят при свёрнутой вкладке
+4. **iPhone** — добавьте сайт «На экран Домой» (Safari → Поделиться), iOS 16.4+
+
+Формат: заголовок **«Сигнал»**, текст — название объявления (или «N новых объявлений · …»).
+
 ## Привязка Avito (кнопка «Позвонить»)
 
 1. На Android установите Kiwi Browser и расширение Cookie-Editor

@@ -17,6 +17,7 @@ from avito_search import list_categories, preview, search_regions, set_seller_sk
 from avito_user import clear_user_session, fetch_user_phone, normalize_import, save_user_session, session_status
 from resource_api import fetch_balance
 from app_auth import auth_status, is_authenticated, login as app_login, logout as app_logout
+from push_service import is_configured as push_configured, notify_new_ads as push_notify_new_ads, send_test_push, subscribe as push_subscribe, unsubscribe as push_unsubscribe, vapid_public_key
 
 _DISCONNECT = (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, TimeoutError)
 
@@ -69,6 +70,7 @@ def publish_ads(ads: list[dict]) -> None:
     for listener in listeners:
         listener.put(incoming)
     logger.info(f"В веб-ленту добавлено {len(incoming)} объявлений")
+    push_notify_new_ads(incoming)
 
 
 def clear_ads() -> int:
@@ -180,8 +182,9 @@ class Handler(BaseHTTPRequestHandler):
             ".woff2": "font/woff2",
             ".png": "image/png",
             ".ico": "image/x-icon",
+            ".webmanifest": "application/manifest+json; charset=utf-8",
         }
-        cache = "no-store" if suffix == ".html" else "public, max-age=86400"
+        cache = "no-store" if suffix in {".html", ".js"} or rel == "sw.js" else "public, max-age=86400"
         data = path.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", types.get(suffix, "application/octet-stream"))
@@ -204,6 +207,24 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/assets/"):
             if not self._serve_static(parsed.path.lstrip("/")):
                 self.send_error(404)
+            return
+        if parsed.path == "/sw.js":
+            if not self._serve_static("sw.js"):
+                self.send_error(404)
+            return
+        if parsed.path == "/manifest.webmanifest":
+            if not self._serve_static("manifest.webmanifest"):
+                self.send_error(404)
+            return
+        if parsed.path.startswith("/icons/"):
+            if not self._serve_static(parsed.path.lstrip("/")):
+                self.send_error(404)
+            return
+        if parsed.path == "/api/push/vapid":
+            self._json(200, {
+                "configured": push_configured(),
+                "publicKey": vapid_public_key() or "",
+            })
             return
         if parsed.path == "/api/auth/status":
             self._json(200, auth_status())
@@ -483,6 +504,41 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(400, {"error": str(err)})
                 return
             self._json(200, {"ok": True, **session_status(), "label": session.get("label")})
+            return
+        if parsed.path == "/api/push/subscribe":
+            if not self._require_sub():
+                return
+            if not push_configured():
+                self._json(503, {"error": "Web Push не настроен на сервере (VAPID)"})
+                return
+            try:
+                payload = self._read_json()
+            except ValueError:
+                self._json(400, {"error": "Некорректный JSON"})
+                return
+            try:
+                total = push_subscribe(payload)
+            except ValueError as err:
+                self._json(400, {"error": str(err)})
+                return
+            send_test_push()
+            self._json(200, {"ok": True, "subscriptions": total})
+            return
+        if parsed.path == "/api/push/unsubscribe":
+            if not self._require_sub():
+                return
+            try:
+                payload = self._read_json()
+            except ValueError:
+                self._json(400, {"error": "Некорректный JSON"})
+                return
+            endpoint = str(payload.get("endpoint") or "")
+            try:
+                total = push_unsubscribe(endpoint)
+            except ValueError as err:
+                self._json(400, {"error": str(err)})
+                return
+            self._json(200, {"ok": True, "subscriptions": total})
             return
         self.send_error(404)
 
