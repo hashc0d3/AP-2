@@ -63,6 +63,12 @@ def _public_key_b64u(vapid: object) -> str | None:
 
 
 def vapid_public_key() -> str | None:
+    vapid = _load_vapid()
+    if vapid:
+        try:
+            return _public_key_b64u(vapid)
+        except Exception as err:
+            logger.warning(f"VAPID public key error: {err}")
     env_pub = os.environ.get("VAPID_PUBLIC_KEY", "").strip()
     if env_pub:
         return env_pub
@@ -70,14 +76,7 @@ def vapid_public_key() -> str | None:
         stored = VAPID_PUBLIC_PATH.read_text(encoding="utf-8").strip()
         if stored:
             return stored
-    vapid = _load_vapid()
-    if not vapid:
-        return None
-    try:
-        return _public_key_b64u(vapid)
-    except Exception as err:
-        logger.warning(f"VAPID public key error: {err}")
-        return None
+    return None
 
 
 def is_configured() -> bool:
