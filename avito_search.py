@@ -189,6 +189,11 @@ REGIONS: list[dict[str, str]] = [
 _REGION_BY_SLUG = {item["slug"]: item for item in REGIONS}
 DEFAULT_REGION = REGIONS[0]
 
+# Avito slug в URL часто шире, чем slug в нашем списке регионов.
+WEB_REGION_SLUG: dict[str, str] = {
+    "moskva": "moskva_i_mo",
+}
+
 CATEGORIES: list[dict] = [
     {
         "id": "apple_phones",
@@ -201,7 +206,7 @@ CATEGORIES: list[dict] = [
         "name": "Игровые приставки",
         "path": (
             "igry_pristavki_i_programmy/igry_pristavki_i_programmy/"
-            "igrovye_pristavki_i_aksessuary/igrovye_pristavki-ASgBAgICAkSSAsoJ9M0UmsqPAw"
+            "igrovye_pristavki/igrovye_pristavki-ASgBAgICAkSSAsoJ9M0UmsqPAw"
         ),
         "extra": [],
     },
@@ -315,13 +320,18 @@ def search_regions(query: str, limit: int = 20) -> list[dict[str, str]]:
     return [dict(item) for _, item in scored[:limit]]
 
 
+def _web_region_slug(region_slug: str) -> str:
+    slug = (region_slug or DEFAULT_REGION["slug"]).strip().strip("/") or DEFAULT_REGION["slug"]
+    return WEB_REGION_SLUG.get(slug, slug)
+
+
 def build_web_url(
     query: str,
     region_slug: str,
     category_id: str = "",
     iphone_models: list | None = None,
 ) -> str:
-    slug = (region_slug or DEFAULT_REGION["slug"]).strip("/") or DEFAULT_REGION["slug"]
+    slug = _web_region_slug(region_slug)
     category = find_category(category_id) if category_id else dict(DEFAULT_CATEGORY)
     path = "/".join(part for part in (slug, category.get("path") or "") if part)
     parts = list(category.get("extra") or [])
@@ -384,7 +394,8 @@ def convert_to_api_url(web_url: str) -> str:
 def _load_location_cache() -> dict[str, str]:
     defaults = {
         "all": "621540",
-        "moskva": "637640",
+        "moskva": "107620",
+        "moskva_i_mo": "107620",
         "sankt-peterburg": "653240",
         "moskovskaya_oblast": "637680",
         "leningradskaya_oblast": "653240",
@@ -438,7 +449,7 @@ def build_api_url_local(region_slug: str, category_id: str) -> str | None:
         return None
     slug = (region_slug or DEFAULT_REGION["slug"]).strip() or DEFAULT_REGION["slug"]
     cache = _load_location_cache()
-    location_id = cache.get(slug)
+    location_id = cache.get(slug) or cache.get(_web_region_slug(slug))
     if not location_id:
         return None
 

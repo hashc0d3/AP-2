@@ -70,6 +70,7 @@ def test_build_api_url_local() -> None:
     game = build_api_url_local("moskva", "game_consoles")
     assert game
     assert "categoryId=97" in game
+    assert "locationId=107620" in game
     assert "params%5B137%5D=613" in game
     assert "sort=date" in game
     assert "privateOnly=1" in game
@@ -88,11 +89,15 @@ def test_build_api_url_local() -> None:
 
 def test_build_web_url_new_categories() -> None:
     game = build_web_url("", "kazan", "game_consoles")
-    assert "igrovye_pristavki-ASgBAgICAkSSAsoJ9M0UmsqPAw" in game
+    assert "igrovye_pristavki/igrovye_pristavki-ASgBAgICAkSSAsoJ9M0UmsqPAw" in game
     assert game.startswith("https://www.avito.ru/kazan/")
     assert "localPriority=0" in game
     assert "s=104" in game
     assert "owner[]=private" in game
+
+    game_msk = build_web_url("", "moskva", "game_consoles")
+    assert "https://www.avito.ru/moskva_i_mo/" in game_msk
+    assert "igrovye_pristavki_i_aksessuary" not in game_msk
 
     laptops = build_web_url("", "sankt-peterburg", "laptops_apple")
     assert "noutbuki/apple-ASgBAgICAUSo5A302WY" in laptops
