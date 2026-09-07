@@ -21,7 +21,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY *.py ./
-COPY tools/ ./tools/
+COPY tools/generate_vapid.py ./tools/generate_vapid.py
 COPY --from=web /app/static ./static/
 
 RUN mkdir -p storage/cookies logs

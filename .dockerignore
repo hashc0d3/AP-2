@@ -13,7 +13,8 @@ web/node_modules
 node_modules
 .playwright
 tests
-tools
+tools/*
+!tools/generate_vapid.py
 config.toml
 *.md
 !README.md
