@@ -2,6 +2,8 @@ import type { Ad } from "./types";
 
 export type PushBlockReason = "unsupported" | "insecure" | "denied" | "default" | "server";
 
+const WEB_PUSH_KEY = "parser1.webPushSubscribed";
+
 function isMobileDevice(): boolean {
   return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 }
@@ -178,6 +180,13 @@ export async function subscribeWebPush(): Promise<boolean> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(subscription.toJSON()),
   });
+  if (res.ok) {
+    try {
+      localStorage.setItem(WEB_PUSH_KEY, "on");
+    } catch {
+      /* empty */
+    }
+  }
   return res.ok;
 }
 
@@ -199,6 +208,11 @@ export async function unsubscribeWebPush(): Promise<void> {
     } catch {
       /* empty */
     }
+  }
+  try {
+    localStorage.removeItem(WEB_PUSH_KEY);
+  } catch {
+    /* empty */
   }
 }
 
@@ -225,14 +239,56 @@ export async function disableWebPush(): Promise<void> {
   await unsubscribeWebPush();
 }
 
-/** @deprecated Клиентские уведомления заменены серверным Web Push */
-export function showTestNotification(): boolean {
-  return false;
+export function isWebPushSubscribed(): boolean {
+  try {
+    return localStorage.getItem(WEB_PUSH_KEY) === "on";
+  } catch {
+    return false;
+  }
 }
 
-/** @deprecated Сервер шлёт push через Service Worker */
-export function notifyNewAds(_ads: Ad[]): void {
-  /* server-side web push */
+export function showTestNotification(): boolean {
+  if (!canUsePush() || Notification.permission !== "granted") return false;
+  try {
+    const notification = new Notification("Сигнал", {
+      body: "Уведомления включены",
+      tag: "parser-push-test",
+      silent: false,
+    });
+    notification.onclick = () => {
+      window.focus();
+      notification.close();
+    };
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Fallback, когда Web Push не подписан (вкладка открыта). */
+export function notifyNewAds(ads: Ad[]): void {
+  if (!canUsePush() || Notification.permission !== "granted" || !ads.length) return;
+  if (isWebPushSubscribed()) return;
+
+  const first = ads[0];
+  const title = first.title?.trim() || "Новое объявление";
+  const body = ads.length === 1
+    ? title
+    : `${ads.length} новых объявлений · ${title}`;
+
+  try {
+    const notification = new Notification("Сигнал", {
+      body,
+      tag: "parser-new-ads",
+      silent: false,
+    });
+    notification.onclick = () => {
+      window.focus();
+      notification.close();
+    };
+  } catch {
+    /* empty */
+  }
 }
 
 export function isStandalonePwa(): boolean {

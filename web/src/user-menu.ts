@@ -1,6 +1,6 @@
 import { api } from "./api";
 import { isLightTheme, setLightTheme } from "./theme";
-import { canUsePush, disableWebPush, enableWebPush, hasNotificationApi, initPushServiceWorker, pushBlockReason, pushEnableHint, pushPermission, pushStatusLine, pwaInstallHint, subscribeWebPush } from "./push-notify";
+import { canUsePush, disableWebPush, enableWebPush, hasNotificationApi, initPushServiceWorker, isWebPushSubscribed, pushBlockReason, pushEnableHint, pushPermission, pushStatusLine, pwaInstallHint, showTestNotification, subscribeWebPush } from "./push-notify";
 import {
   addSellerToBlacklist,
   BLACKLIST_EVENT,
@@ -146,7 +146,11 @@ export function mountUserMenu(opts: UserMenuOptions): {
     pushCheck.checked = true;
     syncPushUi();
     const pwaHint = pwaInstallHint();
-    showToast(pwaHint || "Уведомления включены", pwaHint ? "info" : "success");
+    if (!isWebPushSubscribed() && showTestNotification()) {
+      showToast(pwaHint || "Уведомления включены (вкладка)", pwaHint ? "info" : "success");
+    } else {
+      showToast(pwaHint || "Уведомления включены", pwaHint ? "info" : "success");
+    }
     return true;
   };
 

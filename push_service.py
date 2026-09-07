@@ -69,6 +69,7 @@ def subscribe(subscription: dict) -> int:
         subs = [item for item in _load() if item.get("endpoint") != endpoint]
         subs.append(entry)
         _save(subs)
+        logger.info(f"Push: подписка сохранена, всего {len(subs)}")
         return len(subs)
 
 
@@ -109,6 +110,7 @@ def _send_all(payload: str) -> None:
     with _lock:
         subs = list(_load())
     if not subs:
+        logger.debug("Push: нет подписчиков — уведомление не отправлено")
         return
 
     dead: list[str] = []
@@ -140,6 +142,8 @@ def _send_all(payload: str) -> None:
 
     if sent:
         logger.info(f"Push: отправлено {sent} уведомлений")
+    elif subs:
+        logger.warning(f"Push: не удалось отправить ни одному из {len(subs)} подписчиков")
 
 
 def notify_new_ads(ads: list[dict]) -> None:
