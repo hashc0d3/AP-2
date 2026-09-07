@@ -549,9 +549,9 @@ export function mountMonitor(opts: {
         ${meta ? `<div class="card-meta"${metaAttrs}>${escapeHtml(meta)}</div>` : ""}
         ${sellerHtml}
         <div class="card-actions">
-          <button class="card-btn call${ad.can_call ? "" : " muted"}" type="button" data-action="call">
-            ${ICON_PHONE}<span>${ad.can_call ? "Позвонить" : "Открыть"}</span>
-          </button>
+          ${ad.can_call
+            ? `<button class="card-btn call" type="button" data-action="call">${ICON_PHONE}<span>Позвонить</span></button>`
+            : `<button class="card-btn open-ad" type="button" data-action="open-ad">${ICON_EXT}<span>Открыть объявление</span></button>`}
         </div>
         ${descriptionHtml}
       </div>
@@ -575,6 +575,12 @@ export function mountMonitor(opts: {
     callBtn?.addEventListener("click", (ev) => {
       ev.preventDefault();
       void requestPhone(ad, callBtn);
+    });
+
+    const openAdBtn = card.querySelector('button[data-action="open-ad"]') as HTMLButtonElement | null;
+    openAdBtn?.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      window.open(itemWebUrl(ad), "_blank", "noopener");
     });
 
     const photoBtn = card.querySelector('button[data-action="zoom-photo"]') as HTMLButtonElement | null;

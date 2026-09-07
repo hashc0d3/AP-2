@@ -1973,6 +1973,10 @@ button.card-media:hover img {
   background: linear-gradient(180deg, #22c55e, #16a34a);
 }
 
+.card-btn.open-ad {
+  background: linear-gradient(180deg, #3b82f6, #2563eb);
+}
+
 .card-desc {
   width: 100%;
   min-width: 0;
