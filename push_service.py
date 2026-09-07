@@ -38,32 +38,11 @@ def _private_pem() -> str | None:
     return None
 
 
-def _load_vapid() -> object | None:
-    try:
-        from py_vapid import Vapid02
-    except ImportError:
-        logger.warning("py-vapid не установлен")
-        return None
-
-    pem = _private_pem()
-    if not pem:
-        return None
-
-    try:
-        from py_vapid import Vapid02
-
-        vapid = Vapid02()
-        vapid.from_pem(pem.encode("utf-8"))
-        return vapid
-    except Exception as err:
-        logger.warning(f"VAPID private key invalid: {err}")
-        return None
-
-
-def _public_key_b64u(vapid: object) -> str | None:
+def _public_key_b64u_from_pem(pem: str) -> str:
     from cryptography.hazmat.primitives import serialization
 
-    pub_raw = vapid.public_key.public_bytes(
+    private_key = serialization.load_pem_private_key(pem.encode("utf-8"), password=None)
+    pub_raw = private_key.public_key().public_bytes(
         encoding=serialization.Encoding.X962,
         format=serialization.PublicFormat.UncompressedPoint,
     )
@@ -71,10 +50,10 @@ def _public_key_b64u(vapid: object) -> str | None:
 
 
 def vapid_public_key() -> str | None:
-    vapid = _load_vapid()
-    if vapid:
+    pem = _private_pem()
+    if pem:
         try:
-            return _public_key_b64u(vapid)
+            return _public_key_b64u_from_pem(pem)
         except Exception as err:
             logger.warning(f"VAPID public key error: {err}")
     env_pub = os.environ.get("VAPID_PUBLIC_KEY", "").strip()
@@ -181,7 +160,7 @@ def _send_all(payload: str) -> None:
             webpush(
                 subscription_info=sub,
                 data=payload,
-                vapid_private_key=vapid,
+                vapid_private_key=private_pem,
                 vapid_claims=_vapid_claims(),
             )
             sent += 1
