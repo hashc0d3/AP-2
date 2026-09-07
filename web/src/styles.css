@@ -1984,12 +1984,13 @@ button.card-media:hover img {
   line-height: 1.45;
   color: var(--color-muted);
   text-align: left;
-  white-space: pre-line;
   cursor: pointer;
   display: -webkit-box;
-  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
   overflow: hidden;
+  word-break: break-word;
 }
 
 .card-desc:hover {
@@ -1999,7 +2000,9 @@ button.card-media:hover img {
 .card-desc.open {
   display: block;
   -webkit-line-clamp: unset;
+  line-clamp: unset;
   overflow: visible;
+  white-space: pre-line;
 }
 
 .card-btn.price {

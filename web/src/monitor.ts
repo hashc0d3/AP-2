@@ -522,7 +522,7 @@ export function mountMonitor(opts: {
       : "";
     const description = (ad.description || "").trim();
     const descriptionHtml = description
-      ? `<button type="button" class="card-desc" data-action="toggle-desc" aria-expanded="false">${escapeHtml(description)}</button>`
+      ? `<div class="card-desc" data-action="toggle-desc" role="button" tabindex="0" aria-expanded="false">${escapeHtml(description)}</div>`
       : "";
     const mediaHtml = hideImages
       ? ""
@@ -585,12 +585,23 @@ export function mountMonitor(opts: {
       if (urls.length) openImageLightbox(urls);
     });
 
-    const descBtn = card.querySelector('button[data-action="toggle-desc"]') as HTMLButtonElement | null;
-    descBtn?.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      const open = descBtn.classList.toggle("open");
-      descBtn.setAttribute("aria-expanded", open ? "true" : "false");
-    });
+    const descBtn = card.querySelector('[data-action="toggle-desc"]') as HTMLElement | null;
+    if (descBtn) {
+      const toggleDesc = () => {
+        const open = descBtn.classList.toggle("open");
+        descBtn.setAttribute("aria-expanded", open ? "true" : "false");
+      };
+      descBtn.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        toggleDesc();
+      });
+      descBtn.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          toggleDesc();
+        }
+      });
+    }
 
     const blockBtn = card.querySelector('button[data-action="block-seller"]') as HTMLButtonElement | null;
     blockBtn?.addEventListener("click", (ev) => {
