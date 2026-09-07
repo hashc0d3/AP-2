@@ -33,16 +33,41 @@ def _private_pem() -> str | None:
     elif os.environ.get("VAPID_PRIVATE_KEY", "").strip():
         pem = os.environ.get("VAPID_PRIVATE_KEY", "")
     pem = _normalize_pem(pem)
-    if pem and "BEGIN PRIVATE KEY" in pem:
-        return pem
-    return None
+    if not pem or "BEGIN PRIVATE KEY" not in pem:
+        return None
+    try:
+        _load_private_key(pem)
+    except Exception as err:
+        logger.warning(f"VAPID private key invalid: {err}")
+        return None
+    return pem
+
+
+def _load_private_key(pem: str):
+    from cryptography.hazmat.primitives import serialization
+
+    return serialization.load_pem_private_key(pem.encode("utf-8"), password=None)
+
+
+def _load_signing_vapid():
+    pem = _private_pem()
+    if not pem:
+        return None
+    try:
+        from py_vapid import Vapid02
+
+        vapid = Vapid02()
+        vapid.private_key = _load_private_key(pem)
+        return vapid
+    except Exception as err:
+        logger.warning(f"VAPID signing key error: {err}")
+        return None
 
 
 def _public_key_b64u_from_pem(pem: str) -> str:
     from cryptography.hazmat.primitives import serialization
 
-    private_key = serialization.load_pem_private_key(pem.encode("utf-8"), password=None)
-    pub_raw = private_key.public_key().public_bytes(
+    pub_raw = _load_private_key(pem).public_key().public_bytes(
         encoding=serialization.Encoding.X962,
         format=serialization.PublicFormat.UncompressedPoint,
     )
@@ -67,7 +92,7 @@ def vapid_public_key() -> str | None:
 
 
 def is_configured() -> bool:
-    return _private_pem() is not None and bool(vapid_public_key())
+    return _load_signing_vapid() is not None and bool(vapid_public_key())
 
 
 def _vapid_claims() -> dict[str, str]:
@@ -136,8 +161,8 @@ def _format_payload(ads: list[dict]) -> str:
 
 
 def _send_all(payload: str) -> None:
-    private_pem = _private_pem()
-    if not private_pem:
+    vapid = _load_signing_vapid()
+    if not vapid:
         logger.warning("Push: VAPID не настроен — уведомление не отправлено")
         return
 
@@ -160,7 +185,7 @@ def _send_all(payload: str) -> None:
             webpush(
                 subscription_info=sub,
                 data=payload,
-                vapid_private_key=private_pem,
+                vapid_private_key=vapid,
                 vapid_claims=_vapid_claims(),
             )
             sent += 1
