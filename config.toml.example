@@ -6,6 +6,7 @@ api_url = "https://www.avito.ru/web/1/js/items?categoryId=84&owner%5B0%5D=privat
 # Секреты — в .env (PROXY_STRING, COOKIES_API_KEY и т.д.)
 
 ignore_promotion = true
+private_only = true
 seller_skip = ["re:premium"]
 max_age = 300
 notify_max_age = 0

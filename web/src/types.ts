@@ -50,7 +50,7 @@ export type SearchState = {
   api_url?: string;
   error?: string;
   auth?: AuthStatus;
-  iphone_models?: number[] | null;
+  iphone_models?: string[] | null;
 };
 
 export type AvitoConnectStatus = {
@@ -105,4 +105,5 @@ export type Ad = {
   seller?: string;
   published?: string;
   ts?: number;
+  description?: string;
 };

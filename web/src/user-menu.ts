@@ -20,12 +20,20 @@ export function formatUserLabel(username: string): string {
   return `Пользователь: ${display}`;
 }
 
+function formatUserShort(username: string): string {
+  const name = username.trim();
+  if (!name) return "Пользователь";
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
 function themeLabel(light: boolean): string {
   return light ? "светлый" : "тёмный";
 }
 
 type UserMenuOptions = {
   onAvitoClick: () => void;
+  onLogout: () => void;
+  closeFiltersDrawer?: () => void;
 };
 
 export function mountUserMenu(opts: UserMenuOptions): {
@@ -38,6 +46,7 @@ export function mountUserMenu(opts: UserMenuOptions): {
 } {
   const btn = document.getElementById("user-menu-btn") as HTMLButtonElement;
   const btnLabel = document.getElementById("user-menu-btn-label") as HTMLElement;
+  const btnAvatar = document.getElementById("user-menu-btn-avatar") as HTMLElement;
   const back = document.getElementById("user-drawer-back") as HTMLElement;
   const drawer = document.getElementById("user-drawer") as HTMLElement;
   const title = document.getElementById("user-drawer-title") as HTMLElement;
@@ -49,6 +58,7 @@ export function mountUserMenu(opts: UserMenuOptions): {
   const pushCheck = document.getElementById("push-notify") as HTMLInputElement;
   const pushStatus = document.getElementById("push-notify-status") as HTMLElement;
   const pushRequestBtn = document.getElementById("push-notify-request") as HTMLButtonElement;
+  const logoutBtn = document.getElementById("user-menu-logout") as HTMLButtonElement;
   const themeBtn = document.getElementById("theme-toggle") as HTMLButtonElement;
   const themeValue = document.getElementById("theme-toggle-value") as HTMLElement;
   const themePill = document.getElementById("theme-toggle-pill") as HTMLElement;
@@ -230,6 +240,7 @@ export function mountUserMenu(opts: UserMenuOptions): {
     if (open) {
       setDrawerTab(activeTab);
       syncPushUi();
+      opts.closeFiltersDrawer?.();
       if (activeTab === "settings") void refreshBalance();
     }
   };
@@ -246,9 +257,11 @@ export function mountUserMenu(opts: UserMenuOptions): {
   const setUsername = (username: string) => {
     const label = formatUserLabel(username);
     const short = username.trim();
-    btnLabel.textContent = label;
+    const initial = short ? short.charAt(0).toUpperCase() : "S";
+    btnLabel.textContent = formatUserShort(username);
     title.textContent = label;
-    avatar.textContent = short ? short.charAt(0).toUpperCase() : "S";
+    avatar.textContent = initial;
+    btnAvatar.textContent = initial;
   };
 
   const setAvitoStatus = (connected: boolean, label = "") => {
@@ -288,6 +301,11 @@ export function mountUserMenu(opts: UserMenuOptions): {
 
   pushRequestBtn.addEventListener("click", () => {
     void enablePush();
+  });
+
+  logoutBtn.addEventListener("click", () => {
+    setOpen(false);
+    opts.onLogout();
   });
 
   themeBtn.addEventListener("click", () => {

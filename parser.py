@@ -261,6 +261,57 @@ def seller_is_skipped(item: dict, skip: list) -> bool:
     return any(_norm_text(word) in blob for word in skip if word)
 
 
+def seller_profile_links(item: dict) -> list[str]:
+    links: list[str] = []
+    iva = item.get("iva")
+    if isinstance(iva, dict):
+        steps = iva.get("UserInfoStep") or []
+        if not isinstance(steps, list):
+            steps = [steps]
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            payload = step.get("payload") if isinstance(step.get("payload"), dict) else {}
+            profile = payload.get("profile") if isinstance(payload.get("profile"), dict) else {}
+            link = str(profile.get("link") or "").strip()
+            if link:
+                links.append(link)
+    for text in seller_texts(item):
+        if text.startswith("/") or "://" in text:
+            links.append(text)
+    return links
+
+
+def is_company_seller(item: dict) -> bool:
+    if item.get("shopId") or item.get("shop_id"):
+        return True
+    for link in seller_profile_links(item):
+        low = link.lower()
+        if any(part in low for part in ("/brands/", "/shop/", "/company/")):
+            return True
+    return False
+
+
+def is_private_seller(item: dict) -> bool:
+    if is_company_seller(item):
+        return False
+    for link in seller_profile_links(item):
+        if "/user/" in link.lower():
+            return True
+    return False
+
+
+def seller_is_allowed(item: dict, *, private_only: bool = True) -> bool:
+    if not private_only:
+        return True
+    if is_company_seller(item):
+        return False
+    links = seller_profile_links(item)
+    if not links:
+        return True
+    return is_private_seller(item)
+
+
 def ad_address(item: dict) -> str:
     geo = item.get("geo") or {}
     if isinstance(geo, dict):
@@ -391,6 +442,25 @@ def contact_flags(item: dict) -> tuple[bool, bool]:
     return bool(can_call), bool(can_message)
 
 
+def ad_description(item: dict) -> str:
+    text = item.get("description")
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+    iva = item.get("iva")
+    if isinstance(iva, dict):
+        steps = iva.get("DescriptionStep") or []
+        if not isinstance(steps, list):
+            steps = [steps]
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            payload = step.get("payload") if isinstance(step.get("payload"), dict) else {}
+            desc = payload.get("description")
+            if isinstance(desc, str) and desc.strip():
+                return desc.strip()
+    return ""
+
+
 def serialize_ad(item: dict) -> dict:
     images: list[str] = []
     _image_urls(item.get("gallery"), images)
@@ -414,6 +484,7 @@ def serialize_ad(item: dict) -> dict:
         "seller": seller,
         "published": published_text,
         "ts": added_ts,
+        "description": ad_description(item),
     }
 
 
@@ -815,6 +886,7 @@ def parse_once(cfg: dict, ring: CookieRing, seen: set[int], first: bool) -> tupl
     skipped_title = 0
     skipped_iphone_model = 0
     skipped_seller = 0
+    skipped_company = 0
     too_late = 0
     max_age = int(cfg.get("max_age") or 0)
     notify_max_age = int(cfg.get("notify_max_age") or 0)
@@ -826,6 +898,7 @@ def parse_once(cfg: dict, ring: CookieRing, seen: set[int], first: bool) -> tupl
     must_contain = cfg.get("title_must_contain") or []
     skip = cfg.get("title_skip") or []
     seller_skip = cfg.get("seller_skip") or []
+    private_only = cfg.get("private_only", True)
     for item in items:
         try:
             ad_id = int(item["id"])
@@ -841,12 +914,15 @@ def parse_once(cfg: dict, ring: CookieRing, seen: set[int], first: bool) -> tupl
         if seller_is_skipped(item, seller_skip):
             skipped_seller += 1
             continue
+        if not seller_is_allowed(item, private_only=bool(private_only)):
+            skipped_company += 1
+            continue
         if not is_fresh(item, max_age):
             continue
         if not title_matches(item, must_contain, skip):
             skipped_title += 1
             continue
-        if (allowed_models is not None or iphone_min) and not iphone_model_allowed(
+        if (allowed_models is not None or iphone_min) and not cfg.get("iphone_models_in_url") and not iphone_model_allowed(
             item.get("title") or "",
             allowed_models,
             min_gen=iphone_min,
@@ -864,6 +940,7 @@ def parse_once(cfg: dict, ring: CookieRing, seen: set[int], first: bool) -> tupl
     logger.info(
         f"Свежих: {len(ordinary)}, продвинутых скрыто: {promoted}"
         + (f", продавец скрыт: {skipped_seller}" if skipped_seller else "")
+        + (f", компания: {skipped_company}" if skipped_company else "")
         + (f", не iPhone: {skipped_title}" if skipped_title else "")
         + (f", модель iPhone: {skipped_iphone_model}" if skipped_iphone_model else "")
         + (f", поздно в выдаче: {too_late}" if too_late else "")

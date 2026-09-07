@@ -57,19 +57,24 @@ export const api = {
     region?: string;
     category?: string;
     seller_skip?: string[];
-    iphone_models?: number[];
+    iphone_models?: string[] | null;
   }): Promise<SearchState> {
     const sellerSkip = payload.seller_skip ?? [];
-    const iphoneModels = payload.iphone_models ?? [];
+    const iphoneModels = payload.iphone_models;
     const body = payload.mode === "url"
-      ? { mode: "url", url: payload.url || payload.query || "", seller_skip: sellerSkip, iphone_models: iphoneModels }
+      ? {
+        mode: "url",
+        url: payload.url || payload.query || "",
+        seller_skip: sellerSkip,
+        ...(iphoneModels !== undefined ? { iphone_models: iphoneModels } : {}),
+      }
       : {
         mode: "query",
         query: payload.query || "",
         region: payload.region || "all",
-        category: payload.category || "none",
+        category: payload.category || "apple_phones",
         seller_skip: sellerSkip,
-        iphone_models: iphoneModels,
+        ...(iphoneModels !== undefined ? { iphone_models: iphoneModels } : {}),
       };
     return fetchJson<SearchState>("/api/search", {
       method: "POST",

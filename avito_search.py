@@ -2,14 +2,41 @@
 
 from __future__ import annotations
 
+import json
+import re
 import threading
 import time
-from urllib.parse import quote
+from pathlib import Path
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 import requests
 from loguru import logger
 
 SPFA_AVITO_URL = "https://spfa.pro/api/avito-url/"
+SPFA_TIMEOUT = 20.0
+LOCATION_CACHE_PATH = Path("storage") / "spfa_regions.json"
+
+_spfa_lock = threading.Lock()
+_api_url_cache: dict[str, str] = {}
+
+CATEGORY_API: dict[str, dict] = {
+    "apple_phones": {
+        "categoryId": "84",
+        "params": [("110618", "469735"), ("110680", "458500")],
+    },
+    "tablets": {
+        "categoryId": "96",
+        "params": [("122400", "15993277"), ("140", "4995")],
+    },
+    "game_consoles": {
+        "categoryId": "97",
+        "params": [("137", "613"), ("168826", "3273357")],
+    },
+    "laptops_apple": {
+        "categoryId": "98",
+        "params": [("112916", "841338")],
+    },
+}
 
 REGIONS: list[dict[str, str]] = [
     {"slug": "all", "name": "Вся Россия"},
@@ -163,9 +190,33 @@ _REGION_BY_SLUG = {item["slug"]: item for item in REGIONS}
 DEFAULT_REGION = REGIONS[0]
 
 CATEGORIES: list[dict] = [
-    {"id": "none", "name": "Без категории", "path": "", "extra": []},
-    {"id": "electronics", "name": "Электроника", "path": "bytovaya_elektronika", "extra": []},
-    {"id": "phones", "name": "Смартфоны", "path": "telefony/mobile-ASgBAgICAUSwwQ2I_Dc", "extra": ["cd=1"]},
+    {
+        "id": "apple_phones",
+        "name": "Смартфоны Apple",
+        "path": "telefony/mobilnye_telefony/apple-ASgBAgICAkS0wA3OqzmwwQ2I_Dc",
+        "extra": [],
+    },
+    {
+        "id": "game_consoles",
+        "name": "Игровые приставки",
+        "path": (
+            "igry_pristavki_i_programmy/igry_pristavki_i_programmy/"
+            "igrovye_pristavki_i_aksessuary/igrovye_pristavki-ASgBAgICAkSSAsoJ9M0UmsqPAw"
+        ),
+        "extra": [],
+    },
+    {
+        "id": "laptops_apple",
+        "name": "Ноутбуки Apple",
+        "path": "noutbuki/apple-ASgBAgICAUSo5A302WY",
+        "extra": [],
+    },
+    {
+        "id": "tablets",
+        "name": "Планшеты Apple",
+        "path": "planshety_i_elektronnye_knigi/planshety-ASgBAgICAUSYAoZO",
+        "extra": ["f=ASgBAgICAkSYAoZOwPgO~qagDw"],
+    },
 ]
 _CATEGORY_BY_ID = {item["id"]: item for item in CATEGORIES}
 DEFAULT_CATEGORY = CATEGORIES[0]
@@ -184,6 +235,7 @@ _state: dict = {
     "seller_skip": [],
     "search_mode": "query",
     "iphone_models": None,
+    "iphone_models_in_url": False,
 }
 
 
@@ -205,6 +257,7 @@ def snapshot() -> dict:
             "seller_skip": list(_state["seller_skip"]),
             "search_mode": _state["search_mode"],
             "iphone_models": list(_state["iphone_models"]) if _state["iphone_models"] is not None else None,
+            "iphone_models_in_url": bool(_state.get("iphone_models_in_url")),
         }
 
 
@@ -262,53 +315,182 @@ def search_regions(query: str, limit: int = 20) -> list[dict[str, str]]:
     return [dict(item) for _, item in scored[:limit]]
 
 
-def build_web_url(query: str, region_slug: str, category_id: str = "") -> str:
+def build_web_url(
+    query: str,
+    region_slug: str,
+    category_id: str = "",
+    iphone_models: list | None = None,
+) -> str:
     slug = (region_slug or DEFAULT_REGION["slug"]).strip("/") or DEFAULT_REGION["slug"]
     category = find_category(category_id) if category_id else dict(DEFAULT_CATEGORY)
     path = "/".join(part for part in (slug, category.get("path") or "") if part)
     parts = list(category.get("extra") or [])
-    parts.extend(["s=104", "owner[]=private"])
+    parts.extend(["localPriority=0", "s=104", "owner[]=private"])
     text = (query or "").strip()
     if text:
         parts.insert(0, f"q={quote(text)}")
-    return f"https://www.avito.ru/{path}?{'&'.join(parts)}"
+    url = f"https://www.avito.ru/{path}?{'&'.join(parts)}"
+    if category.get("id") == "apple_phones" and iphone_models is not None:
+        from avito_iphone_filters import append_iphone_model_params
+
+        url, _ = append_iphone_model_params(url, iphone_models)
+    return url
 
 
 def convert_to_api_url(web_url: str) -> str:
-    try:
-        response = requests.post(
-            SPFA_AVITO_URL,
-            json={"url": web_url},
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
-            timeout=40,
-        )
-    except requests.RequestException as err:
-        raise RuntimeError(f"Не удалось связаться с ресурсом: {err}") from err
-    if response.status_code == 429:
-        raise RuntimeError("Лимит ресурса: подождите минуту и нажмите ещё раз (2 запроса в минуту)")
-    if response.status_code == 400:
-        raise RuntimeError("Сервис не принял ссылку Avito")
-    if not response.ok:
-        raise RuntimeError(f"Сервис avito-url {response.status_code}: {response.text[:240]}")
-    try:
-        payload = response.json()
-    except ValueError as err:
-        raise RuntimeError("Сервис вернул не JSON") from err
-    api_url = payload.get("api_url") if isinstance(payload, dict) else None
-    if not payload.get("success") or not isinstance(api_url, str) or not api_url.startswith("http"):
-        raise RuntimeError(f"Сервис не вернул api_url: {payload}")
-    return api_url
+    from avito_iphone_filters import strip_iphone_model_params
+
+    base_url = strip_iphone_model_params(web_url)
+    cached = _api_url_cache.get(base_url)
+    if cached:
+        return cached
+
+    with _spfa_lock:
+        cached = _api_url_cache.get(base_url)
+        if cached:
+            return cached
+        logger.info("Запрос spfa.pro для преобразования URL (до 20 с)…")
+        try:
+            response = requests.post(
+                SPFA_AVITO_URL,
+                json={"url": base_url},
+                headers={"Accept": "application/json", "Content-Type": "application/json"},
+                timeout=SPFA_TIMEOUT,
+            )
+        except requests.Timeout as err:
+            raise RuntimeError(
+                "spfa.pro не ответил за 20 с — подождите минуту и попробуйте снова"
+            ) from err
+        except requests.RequestException as err:
+            raise RuntimeError(f"Не удалось связаться с ресурсом: {err}") from err
+        if response.status_code == 429:
+            raise RuntimeError("Лимит spfa.pro: подождите минуту и нажмите ещё раз (2 запроса в минуту)")
+        if response.status_code == 400:
+            raise RuntimeError("Сервис не принял ссылку Avito")
+        if not response.ok:
+            raise RuntimeError(f"Сервис avito-url {response.status_code}: {response.text[:240]}")
+        try:
+            payload = response.json()
+        except ValueError as err:
+            raise RuntimeError("Сервис вернул не JSON") from err
+        api_url = payload.get("api_url") if isinstance(payload, dict) else None
+        if not payload.get("success") or not isinstance(api_url, str) or not api_url.startswith("http"):
+            raise RuntimeError(f"Сервис не вернул api_url: {payload}")
+        _api_url_cache[base_url] = api_url
+        _remember_location_id(base_url, api_url)
+        return api_url
 
 
-def preview(query: str, region_slug: str, category_id: str = "") -> dict:
+def _load_location_cache() -> dict[str, str]:
+    defaults = {
+        "all": "621540",
+        "moskva": "637640",
+        "sankt-peterburg": "653240",
+        "moskovskaya_oblast": "637680",
+        "leningradskaya_oblast": "653240",
+    }
+    if not LOCATION_CACHE_PATH.exists():
+        return dict(defaults)
+    try:
+        data = json.loads(LOCATION_CACHE_PATH.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            merged = dict(defaults)
+            merged.update({str(k): str(v) for k, v in data.items()})
+            return merged
+    except (OSError, ValueError):
+        pass
+    return dict(defaults)
+
+
+def _save_location_cache(data: dict[str, str]) -> None:
+    LOCATION_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    LOCATION_CACHE_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _region_slug_from_web_url(web_url: str) -> str:
+    path = urlsplit(web_url).path.strip("/")
+    if not path:
+        return "all"
+    head = path.split("/", 1)[0]
+    return head or "all"
+
+
+def _location_id_from_api_url(api_url: str) -> str | None:
+    match = re.search(r"(?:^|[?&])locationId=(\d+)", api_url)
+    return match.group(1) if match else None
+
+
+def _remember_location_id(web_url: str, api_url: str) -> None:
+    location_id = _location_id_from_api_url(api_url)
+    if not location_id:
+        return
+    slug = _region_slug_from_web_url(web_url)
+    cache = _load_location_cache()
+    if cache.get(slug) == location_id:
+        return
+    cache[slug] = location_id
+    _save_location_cache(cache)
+
+
+def build_api_url_local(region_slug: str, category_id: str) -> str | None:
+    meta = CATEGORY_API.get(category_id)
+    if not meta:
+        return None
+    slug = (region_slug or DEFAULT_REGION["slug"]).strip() or DEFAULT_REGION["slug"]
+    cache = _load_location_cache()
+    location_id = cache.get(slug)
+    if not location_id:
+        return None
+
+    query: list[tuple[str, str]] = [
+        ("categoryId", str(meta["categoryId"])),
+        ("localPriority", "0"),
+        ("locationId", location_id),
+        ("owner[0]", "private"),
+        ("presentationType", "serp"),
+        ("privateOnly", "1"),
+        ("sort", "date"),
+    ]
+    for key, value in meta.get("params") or []:
+        query.append((f"params[{key}]", str(value)))
+    return f"https://www.avito.ru/web/1/js/items?{urlencode(query)}"
+
+
+def resolve_api_url(
+    web_url: str,
+    *,
+    region_slug: str = "",
+    category_id: str = "",
+) -> str:
+    """Build API URL locally when possible; otherwise ask spfa.pro (cached, without model filters)."""
+    if category_id:
+        local = build_api_url_local(region_slug, category_id)
+        if local:
+            logger.info("API URL собран локально (без spfa.pro)")
+            return local
+    return convert_to_api_url(web_url)
+
+
+def preview(
+    query: str,
+    region_slug: str,
+    category_id: str = "",
+    iphone_models: list | None = None,
+) -> dict:
     region = find_region(region_slug) if region_slug else dict(DEFAULT_REGION)
     category = find_category(category_id) if category_id else dict(DEFAULT_CATEGORY)
-    web_url = build_web_url(query, region["slug"], category["id"])
+    normalized_models = None
+    if iphone_models is not None and category.get("id") == "apple_phones":
+        from iphone_filter import normalize_allowed_models
+
+        normalized_models = normalize_allowed_models(iphone_models)
+    web_url = build_web_url(query, region["slug"], category["id"], normalized_models)
     return {
         "query": (query or "").strip(),
         "region": region,
         "category": _public_category(category),
         "web_url": web_url,
+        "iphone_models": normalized_models,
     }
 
 
@@ -332,11 +514,28 @@ def start_search(
             "category": {"id": "none", "name": "Без категории"},
             "web_url": link,
         }
+        from avito_iphone_filters import iphone_model_params_present
+
+        iphone_models_in_url = iphone_model_params_present(link) or "f=" in link
     else:
-        preview_data = preview(query, region_slug, category_id)
+        preview_data = preview(query, region_slug, category_id, iphone_models)
+        iphone_models_in_url = False
     web_url = preview_data["web_url"]
-    logger.info(f"Преобразую web URL в API: {web_url}")
-    api_url = convert_to_api_url(web_url)
+    logger.info(f"Web URL: {web_url}")
+    if mode == "url":
+        api_url = resolve_api_url(web_url)
+    else:
+        api_url = resolve_api_url(
+            web_url,
+            region_slug=preview_data["region"]["slug"],
+            category_id=preview_data["category"]["id"],
+        )
+    if preview_data.get("iphone_models") is not None:
+        from avito_iphone_filters import append_iphone_model_params
+
+        api_url, iphone_models_in_url = append_iphone_model_params(
+            api_url, preview_data["iphone_models"]
+        )
     logger.info(f"API URL: {api_url}")
     with _lock:
         _state["generation"] += 1
@@ -356,6 +555,7 @@ def start_search(
             from iphone_filter import normalize_allowed_models
 
             _state["iphone_models"] = normalize_allowed_models(iphone_models)
+        _state["iphone_models_in_url"] = iphone_models_in_url
         generation = _state["generation"]
     _changed.set()
     return snapshot() | {"generation": generation}
@@ -414,4 +614,6 @@ def apply_runtime(cfg: dict, search: dict) -> dict:
     runtime["seller_skip"] = merged
     if search.get("iphone_models") is not None:
         runtime["iphone_models"] = list(search["iphone_models"])
+    if search.get("iphone_models_in_url"):
+        runtime["iphone_models_in_url"] = True
     return runtime

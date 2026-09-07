@@ -57,3 +57,9 @@ export function formatAddedAt(ts: number, timeZone: string): string {
 export function imgSrc(url: string): string {
   return "/img?u=" + encodeURIComponent(url);
 }
+
+/** Avito CDN: поддомен — условный размер; 128 — максимальное качество. */
+export function imgSrcLarge(url: string): string {
+  const large = url.replace(/^https:\/\/(\d+)\.img\.avito\.st\//, "https://128.img.avito.st/");
+  return imgSrc(large);
+}

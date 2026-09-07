@@ -4,23 +4,32 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Сигнал — мониторинг Avito</title>
-  <script type="module" crossorigin src="/assets/index-CXpF9Fq0.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-DhGM45cc.css">
+  <script type="module" crossorigin src="/assets/index-CrW8qJ8g.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-TdbODbNA.css">
 </head>
 <body>
   <header class="sticky top-0 z-30 border-b border-edge bg-ink/90 backdrop-blur-md">
-    <div class="wrap shell-header">
-      <div class="shell-logo">Сигнал<span class="text-brand">.</span></div>
+    <div class="wrap shell-header shell-header--app">
       <div class="shell-actions">
+        <div class="shell-app-tools hidden" id="shell-app-tools">
+          <span class="search-status-pill is-idle" id="search-status-pill" aria-live="polite">
+            <span class="search-status-dot" aria-hidden="true"></span>
+            <span id="search-status-label">Поиск остановлен</span>
+          </span>
+          <button type="button" class="header-filters-btn" id="filters-open-btn" aria-expanded="false" aria-controls="filters-drawer">
+            Фильтры
+          </button>
+        </div>
         <div class="shell-user hidden" id="shell-user">
           <button type="button" class="user-menu-btn" id="user-menu-btn" aria-expanded="false" aria-controls="user-drawer">
-            <span id="user-menu-btn-label">Пользователь: …</span>
+            <span class="user-menu-btn-avatar" id="user-menu-btn-avatar" aria-hidden="true">S</span>
+            <span id="user-menu-btn-label">…</span>
             <svg class="user-menu-btn-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path d="M6 9l6 6 6-6"></path>
             </svg>
           </button>
         </div>
-        <button class="btn-ghost btn-sm" id="auth-btn" type="button">Войти</button>
+        <button class="btn-ghost btn-sm hidden" id="auth-btn" type="button">Войти</button>
       </div>
     </div>
   </header>
@@ -28,18 +37,20 @@
   <div class="user-drawer-back hidden" id="user-drawer-back" aria-hidden="true">
     <aside class="user-drawer" id="user-drawer" role="dialog" aria-labelledby="user-drawer-title">
       <div class="user-drawer-head">
-        <div class="user-drawer-profile">
-          <div class="user-drawer-avatar" id="user-drawer-avatar" aria-hidden="true">S</div>
-          <div class="user-drawer-profile-text">
-            <p class="user-drawer-kicker">Аккаунт</p>
-            <h2 class="user-drawer-title" id="user-drawer-title">Пользователь</h2>
-          </div>
-        </div>
+        <div class="user-drawer-brand shell-logo">Сигнал<span class="text-brand">.</span></div>
         <button type="button" class="user-drawer-close" id="user-drawer-close" aria-label="Закрыть">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path d="M6 6l12 12M18 6L6 18"></path>
           </svg>
         </button>
+      </div>
+
+      <div class="user-drawer-profile">
+        <div class="user-drawer-avatar" id="user-drawer-avatar" aria-hidden="true">S</div>
+        <div class="user-drawer-profile-text">
+          <p class="user-drawer-kicker">Аккаунт</p>
+          <h2 class="user-drawer-title" id="user-drawer-title">Пользователь</h2>
+        </div>
       </div>
 
       <div class="user-drawer-tabs" role="tablist">
@@ -129,6 +140,17 @@
           </div>
         </div>
       </div>
+
+      <div class="user-drawer-foot">
+        <button type="button" class="user-menu-logout" id="user-menu-logout">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+            <path d="M16 17l5-5-5-5"></path>
+            <path d="M21 12H9"></path>
+          </svg>
+          <span>Выйти</span>
+        </button>
+      </div>
     </aside>
   </div>
 
@@ -180,12 +202,23 @@
     </div>
   </div>
 
-  <div id="app" class="hidden page-section">
-    <div class="monitor-sticky">
-      <div class="wrap" id="search-panel">
-        <div class="search-shell" id="search-body">
-          <div id="search-fields">
-          <form id="search-form" class="search-form" autocomplete="off">
+  <div class="filters-drawer-back hidden" id="filters-drawer-back" aria-hidden="true">
+    <aside class="filters-drawer" id="filters-drawer" role="dialog" aria-labelledby="filters-drawer-title">
+      <div class="filters-drawer-head">
+        <div class="filters-drawer-head-text">
+          <p class="user-drawer-kicker">Поиск</p>
+          <h2 class="user-drawer-title" id="filters-drawer-title">Фильтры</h2>
+        </div>
+        <button type="button" class="user-drawer-close" id="filters-close" aria-label="Закрыть">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M6 6l12 12M18 6L6 18"></path>
+          </svg>
+        </button>
+      </div>
+      <div class="filters-drawer-body">
+      <div class="search-shell filters-shell" id="search-body">
+        <div id="search-fields">
+        <form id="search-form" class="search-form" autocomplete="off">
             <div class="search-mode-row" id="search-mode-row">
               <div class="search-mode-chips">
                 <button type="button" class="chip active" data-mode="query" id="mode-query">По запросу</button>
@@ -205,7 +238,7 @@
               </div>
             </div>
             <div class="search-field-wrap" id="search-field-wrap">
-              <div class="search-input-row">
+              <div class="url-search-combo" id="url-search-combo">
                 <div class="search-field">
                   <span class="icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="size-[18px]">
@@ -220,95 +253,120 @@
                     </svg>
                   </button>
                 </div>
-                <button type="button" class="search-settings-btn" id="search-settings-btn" aria-label="Настройки поиска" aria-expanded="false" aria-controls="search-settings-pop" title="Настройки поиска">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"></path>
-                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-                  </svg>
-                </button>
-              </div>
-              <div class="search-settings-pop" id="search-settings-pop">
-                <div class="search-settings-block" id="search-settings-cats">
-                  <p class="search-settings-title">Категория</p>
-                  <div class="cat-row" id="cats"></div>
-                </div>
-                <div class="search-settings-block" id="search-settings-iphone">
-                  <div class="search-settings-title-row">
-                    <p class="search-settings-title">Модели</p>
-                    <div class="iphone-model-actions">
-                      <button type="button" class="iphone-model-action" id="iphone-models-all">Все</button>
-                      <button type="button" class="iphone-model-action" id="iphone-models-none">Снять</button>
-                    </div>
-                  </div>
-                  <div class="iphone-model-groups" id="iphone-models"></div>
-                </div>
-                <div class="search-settings-block hidden" id="search-settings-url">
-                  <p class="search-settings-title">Ссылка</p>
-                  <label class="search-settings-check" for="save-url">
-                    <span class="search-settings-check-label">Сохранить ссылку</span>
-                    <span class="styled-check">
-                      <input id="save-url" type="checkbox" checked />
-                      <span class="styled-check-box" aria-hidden="true">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                          <path d="M5 12.5 10 17.5 19 7"></path>
-                        </svg>
-                      </span>
-                    </span>
-                  </label>
-                  <div class="url-saved-fold hidden" id="url-saved-fold">
-                    <button type="button" class="url-saved-fold-btn" id="url-saved-fold-btn" aria-expanded="false">
-                      <span class="url-saved-fold-text">
-                        <span class="url-saved-fold-label">Сохранённая ссылка</span>
-                        <span class="url-saved-fold-preview" id="url-saved-preview"></span>
-                      </span>
-                      <svg class="url-saved-fold-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                        <path d="M6 9l6 6 6-6"></path>
-                      </svg>
-                    </button>
-                    <div class="url-saved-fold-body hidden" id="saved-url-box">
-                      <a id="saved-url-link" class="saved-url-link" href="#" target="_blank" rel="noopener"></a>
-                    </div>
-                  </div>
-                </div>
-                <div class="search-settings-block" id="search-settings-display">
-                  <p class="search-settings-title">Отображение</p>
-                  <label class="search-settings-check" for="hide-images">
-                    <span class="search-settings-check-label">Без картинок</span>
-                    <span class="styled-check">
-                      <input id="hide-images" type="checkbox" />
-                      <span class="styled-check-box" aria-hidden="true">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                          <path d="M5 12.5 10 17.5 19 7"></path>
-                        </svg>
-                      </span>
-                    </span>
-                  </label>
+                <div class="url-search-dropdown hidden" id="url-search-dropdown">
+                  <p class="url-search-dropdown-hint">Сохранённые ссылки</p>
+                  <div class="url-search-dropdown-list" id="url-search-dropdown-list"></div>
                 </div>
               </div>
             </div>
-          </form>
-          </div>
+        </form>
+        </div>
 
         <div class="search-actions-block" id="search-actions-block">
           <div class="search-actions" id="search-actions">
             <button class="btn-primary" id="start" type="button">Начать поиск</button>
             <button class="btn-stop" id="stop" type="button" disabled>Остановить</button>
           </div>
-          <div class="search-collapse-row">
-            <p class="search-filters-label hidden" id="search-filters-label">Фильтры</p>
-            <a class="search-filters-url hidden" id="search-filters-url" href="#" target="_blank" rel="noopener"></a>
-            <button type="button" class="search-collapse-btn" id="toggle-search" aria-label="Скрыть фильтры" title="Скрыть фильтры">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="size-5" aria-hidden="true">
-                <path d="M6 15l6-6 6 6"></path>
+        </div>
+
+        <div class="filters-sections" id="filters-sections">
+          <section class="filter-section open" id="search-settings-cats">
+            <button type="button" class="filter-section-toggle" id="filter-toggle-cats" aria-expanded="true" aria-controls="filter-body-cats">
+              <span class="filter-section-label">Категория</span>
+              <svg class="filter-section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M6 9l6 6 6-6"></path>
               </svg>
             </button>
-          </div>
+            <div class="filter-section-body" id="filter-body-cats">
+              <div class="multi-select" id="category-wrap">
+                <button type="button" class="multi-select-trigger filter-select-trigger" id="category-trigger" aria-haspopup="listbox" aria-expanded="false">
+                  <span id="category-label">Смартфоны Apple</span>
+                </button>
+                <div class="multi-select-panel hidden" id="category-panel" role="listbox">
+                  <div class="multi-select-options" id="cats"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="filter-section open hidden" id="search-settings-iphone">
+            <button type="button" class="filter-section-toggle" id="filter-toggle-iphone" aria-expanded="true" aria-controls="filter-body-iphone">
+              <span class="filter-section-label">Модели iPhone</span>
+              <svg class="filter-section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M6 9l6 6 6-6"></path>
+              </svg>
+            </button>
+            <div class="filter-section-body" id="filter-body-iphone">
+              <div class="multi-select" id="iphone-models-wrap">
+                <button type="button" class="multi-select-trigger filter-select-trigger" id="iphone-models-trigger" aria-haspopup="listbox" aria-expanded="false">
+                  <span id="iphone-models-label">Все модели</span>
+                </button>
+                <div class="multi-select-panel hidden" id="iphone-models-panel" role="listbox" aria-multiselectable="true">
+                  <div class="multi-select-actions">
+                    <button type="button" class="iphone-model-action" id="iphone-models-all">Все</button>
+                    <button type="button" class="iphone-model-action" id="iphone-models-none">Снять</button>
+                  </div>
+                  <div class="multi-select-options" id="iphone-models"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="filter-section hidden" id="search-settings-url">
+            <button type="button" class="filter-section-toggle" id="filter-toggle-url" aria-expanded="false" aria-controls="filter-body-url">
+              <span class="filter-section-label">Ссылка</span>
+              <svg class="filter-section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M6 9l6 6 6-6"></path>
+              </svg>
+            </button>
+            <div class="filter-section-body hidden" id="filter-body-url">
+              <div class="saved-urls-manage" id="saved-urls-manage">
+                <p class="hint saved-urls-hint">До 5 ссылок с названием.</p>
+                <div class="saved-urls-list" id="saved-urls-list"></div>
+                <div class="saved-url-add-form hidden" id="saved-url-add-form">
+                  <input type="text" class="field saved-url-add-name" id="saved-url-add-name" placeholder="Название" maxlength="64" autocomplete="off" />
+                  <input type="url" class="field saved-url-add-url" id="saved-url-add-url" placeholder="https://www.avito.ru/..." autocomplete="off" />
+                  <div class="saved-url-add-actions">
+                    <button type="button" class="btn-primary saved-url-add-confirm" id="saved-url-add-confirm">Добавить</button>
+                    <button type="button" class="btn-ghost saved-url-add-cancel" id="saved-url-add-cancel">Отмена</button>
+                  </div>
+                </div>
+                <button type="button" class="btn-soft saved-url-add-btn" id="saved-url-add-btn">Добавить ссылку</button>
+                <p class="hint saved-urls-limit hidden" id="saved-urls-limit">Максимум 5 ссылок</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="filter-section" id="search-settings-display">
+            <button type="button" class="filter-section-toggle" id="filter-toggle-display" aria-expanded="false" aria-controls="filter-body-display">
+              <span class="filter-section-label">Отображение</span>
+              <svg class="filter-section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M6 9l6 6 6-6"></path>
+              </svg>
+            </button>
+            <div class="filter-section-body hidden" id="filter-body-display">
+              <label class="search-settings-check" for="hide-images">
+                <span class="search-settings-check-label">Без картинок</span>
+                <span class="styled-check">
+                  <input id="hide-images" type="checkbox" />
+                  <span class="styled-check-box" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                      <path d="M5 12.5 10 17.5 19 7"></path>
+                    </svg>
+                  </span>
+                </span>
+              </label>
+            </div>
+          </section>
         </div>
       </div>
-    </div>
+      </div>
+    </aside>
+  </div>
 
+  <div id="app" class="hidden page-section">
     <main id="feed" class="wrap feed feed-empty">
-      <div class="empty">Задайте запрос и нажмите «Начать поиск»</div>
+      <div class="empty">Откройте «Фильтры» и нажмите «Начать поиск»</div>
     </main>
   </div>
 

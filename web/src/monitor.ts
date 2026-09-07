@@ -1,10 +1,20 @@
 import { api } from "./api";
-import { openMessenger, itemWebUrl } from "./avito-links";
-import { ICON_CLOSE, ICON_EXT, ICON_MSG, ICON_PHONE, ICON_STAR, ICON_STAR_OUTLINE } from "./card-icons";
+import { itemWebUrl } from "./avito-links";
+import { ICON_CLOSE, ICON_EXT, ICON_PHONE, ICON_STAR, ICON_STAR_OUTLINE } from "./card-icons";
 import { isFavorite, toggleFavorite } from "./favorites";
 import { notifyNewAds } from "./push-notify";
 import { displayPrice, escapeHtml, formatAddedAt, imgSrc } from "./format";
+import { openImageLightbox } from "./image-lightbox";
 import { regionTimezone } from "./region-timezones";
+import {
+  addSavedUrl,
+  findSavedUrlByUrl,
+  MAX_SAVED_URLS,
+  migrateLegacySavedUrl,
+  removeSavedUrl,
+  type SavedUrl,
+  updateSavedUrl,
+} from "./saved-urls";
 import {
   addSellerToBlacklist,
   BLACKLIST_EVENT,
@@ -16,7 +26,8 @@ import { showToast, type ToastKind } from "./toast";
 import {
   DEFAULT_IPHONE_MODELS,
   IPHONE_MODELS,
-  iphoneModelsToGens,
+  iphoneModelsSummary,
+  iphoneModelsToPayload,
   isDefaultIphoneSelection,
   loadIphoneModels,
   normalizeIphoneModels,
@@ -25,8 +36,6 @@ import {
 import type { Ad, Category, Region, SearchMode } from "./types";
 
 const CACHE_KEY = "parser1.search";
-const PANEL_KEY = "parser1.searchPanel";
-const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12.5 10 17.5 19 7"></path></svg>';
 
 function $(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -41,10 +50,12 @@ function input(id: string): HTMLInputElement {
 export function mountMonitor(opts: {
   isPushEnabled?: () => boolean;
   onAvitoStatus?: (connected: boolean, label?: string) => void;
+  closeUserMenu?: () => void;
 } = {}): {
   show: () => void;
   hide: () => void;
   openAvito: () => void;
+  closeFilters: () => void;
 } {
   const app = $("app");
   const feed = $("feed");
@@ -60,21 +71,36 @@ export function mountMonitor(opts: {
   const queryEl = input("query");
   const queryClearBtn = $("query-clear") as HTMLButtonElement;
   const searchFieldWrap = $("search-field-wrap");
-  const searchSettingsBtn = $("search-settings-btn") as HTMLButtonElement;
-  const searchSettingsPop = $("search-settings-pop");
-  const searchSettingsCats = $("search-settings-cats");
+  const filtersSections = $("filters-sections");
   const iphoneModelsEl = $("iphone-models");
+  const iphoneModelsWrap = $("iphone-models-wrap");
+  const iphoneModelsTrigger = $("iphone-models-trigger") as HTMLButtonElement;
+  const iphoneModelsPanel = $("iphone-models-panel");
+  const iphoneModelsLabel = $("iphone-models-label");
   const iphoneModelsAllBtn = $("iphone-models-all") as HTMLButtonElement;
   const iphoneModelsNoneBtn = $("iphone-models-none") as HTMLButtonElement;
+  const searchSettingsCats = $("search-settings-cats");
+  const searchSettingsIphone = $("search-settings-iphone");
   const searchSettingsUrl = $("search-settings-url");
-  const saveUrlCheck = input("save-url");
   const hideImagesCheck = input("hide-images");
-  const urlSavedFold = $("url-saved-fold");
-  const urlSavedFoldBtn = $("url-saved-fold-btn") as HTMLButtonElement;
-  const urlSavedPreview = $("url-saved-preview");
-  const savedUrlBox = $("saved-url-box");
-  const savedUrlLink = $("saved-url-link") as HTMLAnchorElement;
-  const searchFiltersUrl = $("search-filters-url") as HTMLAnchorElement;
+  const urlSearchCombo = $("url-search-combo");
+  const urlSearchDropdown = $("url-search-dropdown");
+  const urlSearchDropdownList = $("url-search-dropdown-list");
+  const savedUrlsManage = $("saved-urls-manage");
+  const savedUrlsList = $("saved-urls-list");
+  const savedUrlAddBtn = $("saved-url-add-btn") as HTMLButtonElement;
+  const savedUrlAddForm = $("saved-url-add-form");
+  const savedUrlAddNameInput = input("saved-url-add-name");
+  const savedUrlAddUrlInput = input("saved-url-add-url");
+  const savedUrlAddConfirmBtn = $("saved-url-add-confirm") as HTMLButtonElement;
+  const savedUrlAddCancelBtn = $("saved-url-add-cancel") as HTMLButtonElement;
+  const savedUrlsLimit = $("saved-urls-limit");
+  const filtersDrawerBack = $("filters-drawer-back");
+  const filtersDrawer = $("filters-drawer");
+  const filtersOpenBtn = $("filters-open-btn") as HTMLButtonElement;
+  const filtersCloseBtn = $("filters-close") as HTMLButtonElement;
+  const searchStatusPill = $("search-status-pill");
+  const searchStatusLabel = $("search-status-label");
   const regionBtn = $("region-btn") as HTMLButtonElement;
   const regionLabel = $("region-label");
   const regionPop = $("region-pop");
@@ -83,26 +109,30 @@ export function mountMonitor(opts: {
   const regionWrap = $("region-wrap");
   const modeQueryBtn = $("mode-query") as HTMLButtonElement;
   const modeUrlBtn = $("mode-url") as HTMLButtonElement;
-  const searchPanel = $("search-panel");
   const searchBody = $("search-body");
   const searchFields = $("search-fields");
   const searchActionsBlock = $("search-actions-block");
   const searchActions = $("search-actions");
-  const searchFiltersLabel = $("search-filters-label");
-  const toggleSearchBtn = $("toggle-search") as HTMLButtonElement;
   const startBtn = $("start") as HTMLButtonElement;
   const stopBtn = $("stop") as HTMLButtonElement;
+  const categoryWrap = $("category-wrap");
+  const categoryTrigger = $("category-trigger") as HTMLButtonElement;
+  const categoryPanel = $("category-panel");
+  const categoryLabel = $("category-label");
   const catsEl = $("cats");
   const seen = new Set<string>();
   let region: Region = { slug: "all", name: "Вся Россия" };
-  let category: Category = { id: "none", name: "Без категории" };
+  const DEFAULT_CATEGORY_ID = "apple_phones";
+  let category: Category = { id: DEFAULT_CATEGORY_ID, name: "Смартфоны Apple" };
   let searchMode: SearchMode = "query";
-  let savedSearchUrl = "";
+  let savedUrls: SavedUrl[] = [];
+  let selectedSavedUrlId: string | null = null;
   let hideImages = false;
   let categories: Category[] = [
-    { id: "none", name: "Без категории" },
-    { id: "electronics", name: "Электроника" },
-    { id: "phones", name: "Смартфоны" },
+    { id: DEFAULT_CATEGORY_ID, name: "Смартфоны Apple" },
+    { id: "game_consoles", name: "Игровые приставки" },
+    { id: "laptops_apple", name: "Ноутбуки Apple" },
+    { id: "tablets", name: "Планшеты Apple" },
   ];
   let monitoring = false;
   let searchBusy = false;
@@ -112,30 +142,112 @@ export function mountMonitor(opts: {
   let selectedIphoneModels = loadIphoneModels();
   const phoneCache = new Map<string, string>();
 
+  const isIphoneCategorySelected = () => searchMode === "query" && category.id === DEFAULT_CATEGORY_ID;
+
+  const setCategoryPanelOpen = (open: boolean) => {
+    categoryPanel.classList.toggle("hidden", !open);
+    categoryPanel.classList.toggle("open", open);
+    categoryTrigger.setAttribute("aria-expanded", open ? "true" : "false");
+    categoryWrap.classList.toggle("open", open);
+  };
+
+  const setIphoneModelsPanelOpen = (open: boolean) => {
+    iphoneModelsPanel.classList.toggle("hidden", !open);
+    iphoneModelsPanel.classList.toggle("open", open);
+    iphoneModelsTrigger.setAttribute("aria-expanded", open ? "true" : "false");
+    iphoneModelsWrap.classList.toggle("open", open);
+  };
+
+  const syncIphoneSectionVisibility = () => {
+    const visible = isIphoneCategorySelected();
+    searchSettingsIphone.classList.toggle("hidden", !visible);
+    if (!visible) {
+      setIphoneModelsPanelOpen(false);
+    }
+    updateSettingsBtnState();
+  };
+
   const updateSettingsBtnState = () => {
-    const urlActive = searchMode === "url" && (saveUrlCheck.checked || Boolean(savedSearchUrl));
-    const iphoneFilterActive = !isDefaultIphoneSelection(selectedIphoneModels);
-    searchSettingsBtn.classList.toggle("active", category.id !== "none" || urlActive || hideImages || iphoneFilterActive);
+    const urlActive = searchMode === "url" && savedUrls.length > 0;
+    const iphoneFilterActive = isIphoneCategorySelected() && !isDefaultIphoneSelection(selectedIphoneModels);
+    const active = category.id !== DEFAULT_CATEGORY_ID || urlActive || hideImages || iphoneFilterActive;
+    filtersOpenBtn.classList.toggle("active", active);
+  };
+
+  const setUrlSearchDropdownOpen = (open: boolean) => {
+    if (searchMode !== "url" || !savedUrls.length) {
+      urlSearchDropdown.classList.add("hidden");
+      return;
+    }
+    urlSearchDropdown.classList.toggle("hidden", !open);
+  };
+
+  const setFilterSectionOpen = (section: HTMLElement, open: boolean) => {
+    const toggle = section.querySelector(".filter-section-toggle") as HTMLButtonElement | null;
+    const body = section.querySelector(".filter-section-body") as HTMLElement | null;
+    section.classList.toggle("open", open);
+    body?.classList.toggle("hidden", !open);
+    toggle?.setAttribute("aria-expanded", open ? "true" : "false");
+  };
+
+  const bindFilterSectionToggle = (toggleId: string, sectionId: string) => {
+    const toggle = $(toggleId) as HTMLButtonElement;
+    const section = $(sectionId);
+    toggle.addEventListener("click", () => {
+      if (monitoring) return;
+      setFilterSectionOpen(section, !section.classList.contains("open"));
+    });
+  };
+
+  const syncSearchStatus = () => {
+    searchStatusPill.classList.toggle("is-active", monitoring);
+    searchStatusPill.classList.toggle("is-idle", !monitoring);
+    searchStatusLabel.textContent = monitoring ? "Поиск активен" : "Поиск остановлен";
+  };
+
+  const setFiltersDrawerOpen = (open: boolean) => {
+    filtersDrawerBack.classList.toggle("hidden", !open);
+    requestAnimationFrame(() => filtersDrawerBack.classList.toggle("open", open));
+    filtersDrawerBack.setAttribute("aria-hidden", open ? "false" : "true");
+    filtersOpenBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    document.body.classList.toggle("filters-drawer-open", open);
+    if (open) {
+      opts.closeUserMenu?.();
+    }
+    if (!open) {
+      regionPop.classList.remove("open");
+      setCategoryPanelOpen(false);
+      setIphoneModelsPanelOpen(false);
+      setUrlSearchDropdownOpen(false);
+    }
   };
 
   const persistIphoneModels = () => {
     saveIphoneModels(selectedIphoneModels);
-    saveCache();
     updateSettingsBtnState();
   };
 
   const renderIphoneModels = () => {
     const selected = new Set(selectedIphoneModels);
-    iphoneModelsEl.innerHTML = `<div class="cat-row iphone-model-row">${IPHONE_MODELS.map((item) => (
-      `<button type="button" class="chip iphone-chip${selected.has(item.id) ? " active" : ""}" data-id="${escapeHtml(item.id)}" aria-pressed="${selected.has(item.id) ? "true" : "false"}">
-        <span class="mark">${CHECK}</span>${escapeHtml(item.label)}
-      </button>`
-    )).join("")}</div>`;
+    iphoneModelsEl.innerHTML = IPHONE_MODELS.map((item) => (
+      `<label class="multi-select-option">
+        <span class="styled-check">
+          <input type="checkbox" value="${escapeHtml(item.id)}"${selected.has(item.id) ? " checked" : ""} />
+          <span class="styled-check-box" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+              <path d="M5 12.5 10 17.5 19 7"></path>
+            </svg>
+          </span>
+        </span>
+        <span class="multi-select-option-label">${escapeHtml(item.label)}</span>
+      </label>`
+    )).join("");
+    iphoneModelsLabel.textContent = iphoneModelsSummary(selectedIphoneModels);
     updateSettingsBtnState();
   };
 
   const setIphoneModels = (models: string[]) => {
-    selectedIphoneModels = normalizeIphoneModels(models);
+    selectedIphoneModels = normalizeIphoneModels(models, { allowEmpty: true });
     renderIphoneModels();
     persistIphoneModels();
   };
@@ -148,14 +260,17 @@ export function mountMonitor(opts: {
     });
   };
 
-  const setUrlSavedExpanded = (open: boolean) => {
-    savedUrlBox.classList.toggle("hidden", !open);
-    urlSavedFoldBtn.classList.toggle("open", open);
-    urlSavedFoldBtn.setAttribute("aria-expanded", open ? "true" : "false");
-  };
-
   const syncQueryClear = () => {
     queryClearBtn.classList.toggle("hidden", !queryEl.value.trim());
+  };
+
+  const syncQueryFieldVisibility = () => {
+    const show = searchMode === "url";
+    searchFieldWrap.classList.toggle("hidden", !show);
+    if (!show) {
+      queryEl.value = "";
+      syncQueryClear();
+    }
   };
 
   const syncSearchControls = () => {
@@ -167,36 +282,42 @@ export function mountMonitor(opts: {
     modeUrlBtn.disabled = locked;
     regionBtn.disabled = locked;
     regionQuery.disabled = locked;
-    searchSettingsBtn.disabled = locked;
-    saveUrlCheck.disabled = locked;
     hideImagesCheck.disabled = locked;
-    urlSavedFoldBtn.disabled = locked;
+    savedUrlAddBtn.disabled = locked || savedUrls.length >= MAX_SAVED_URLS;
+    savedUrlAddConfirmBtn.disabled = locked;
+    savedUrlAddCancelBtn.disabled = locked;
+    savedUrlAddNameInput.disabled = locked;
+    savedUrlAddUrlInput.disabled = locked;
     startBtn.disabled = searchBusy || locked;
     stopBtn.disabled = searchBusy || !monitoring;
     if (!searchBusy) {
       startBtn.textContent = "Начать поиск";
     }
-    catsEl.querySelectorAll("button.chip").forEach((btn) => {
-      (btn as HTMLButtonElement).disabled = locked;
-    });
-    iphoneModelsEl.querySelectorAll("button.iphone-chip").forEach((btn) => {
-      (btn as HTMLButtonElement).disabled = locked;
+    categoryTrigger.disabled = locked;
+    iphoneModelsTrigger.disabled = locked;
+    iphoneModelsEl.querySelectorAll(".styled-check input").forEach((input) => {
+      (input as HTMLInputElement).disabled = locked;
     });
     iphoneModelsAllBtn.disabled = locked;
     iphoneModelsNoneBtn.disabled = locked;
+    savedUrlsList.querySelectorAll(".saved-url-item-name, .saved-url-item-url, .saved-url-item-delete").forEach((el) => {
+      (el as HTMLButtonElement | HTMLInputElement).disabled = locked;
+    });
+    filtersSections.querySelectorAll(".filter-section-toggle").forEach((btn) => {
+      (btn as HTMLButtonElement).disabled = locked;
+    });
     regionList.querySelectorAll("button[data-slug]").forEach((btn) => {
       (btn as HTMLButtonElement).disabled = locked;
     });
     if (locked) {
-      setSettingsOpen(false);
       regionPop.classList.remove("open");
+      setCategoryPanelOpen(false);
+      setIphoneModelsPanelOpen(false);
     }
   };
 
-  const setSettingsOpen = (open: boolean) => {
-    searchSettingsPop.classList.toggle("open", open);
-    searchSettingsBtn.classList.toggle("open", open);
-    searchSettingsBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  const openFilterSection = (sectionId: string) => {
+    setFilterSectionOpen($(sectionId), true);
   };
 
   const setAvitoSession = (connected: boolean, label = "") => {
@@ -318,29 +439,27 @@ export function mountMonitor(opts: {
         category?: Category;
         searchMode?: SearchMode;
         savedSearchUrl?: string;
-        saveSearchUrl?: boolean;
+        selectedSavedUrlId?: string;
         hideImages?: boolean;
-        iphoneModels?: string[];
       };
       if (data.searchMode === "query" || data.searchMode === "url") {
         searchMode = data.searchMode;
       }
-      savedSearchUrl = String(data.savedSearchUrl || "").trim();
-      saveUrlCheck.checked = data.saveSearchUrl !== false;
+      savedUrls = migrateLegacySavedUrl(String(data.savedSearchUrl || "").trim());
+      selectedSavedUrlId = data.selectedSavedUrlId || null;
+      if (selectedSavedUrlId && !savedUrls.some((item) => item.id === selectedSavedUrlId)) {
+        selectedSavedUrlId = null;
+      }
       hideImages = data.hideImages === true;
       hideImagesCheck.checked = hideImages;
-      if (Array.isArray(data.iphoneModels)) {
-        selectedIphoneModels = normalizeIphoneModels(data.iphoneModels);
-      } else {
-        selectedIphoneModels = loadIphoneModels();
-      }
+      selectedIphoneModels = loadIphoneModels();
       renderIphoneModels();
       if (data.region?.slug && data.region.name) {
         region = { slug: String(data.region.slug), name: String(data.region.name) };
         regionLabel.textContent = region.name;
       }
-      if (data.category?.id && data.category.name) {
-        category = { id: String(data.category.id), name: String(data.category.name) };
+      if (data.category?.id) {
+        category = resolveCategory(String(data.category.id));
       }
       updateSettingsBtnState();
       applyHideImages();
@@ -355,10 +474,8 @@ export function mountMonitor(opts: {
         region,
         category,
         searchMode,
-        savedSearchUrl: saveUrlCheck.checked ? savedSearchUrl : "",
-        saveSearchUrl: saveUrlCheck.checked,
+        selectedSavedUrlId,
         hideImages,
-        iphoneModels: selectedIphoneModels,
       }));
     } catch {
       /* empty */
@@ -403,19 +520,30 @@ export function mountMonitor(opts: {
           </button>
         </div>`
       : "";
+    const description = (ad.description || "").trim();
+    const descriptionHtml = description
+      ? `<button type="button" class="card-desc" data-action="toggle-desc" aria-expanded="false">${escapeHtml(description)}</button>`
+      : "";
     const mediaHtml = hideImages
       ? ""
-      : `<a class="card-media" href="${escapeHtml(web)}" target="_blank" rel="noopener">
+      : photo
+        ? `<button type="button" class="card-media" data-action="zoom-photo" aria-label="Открыть фото">
         ${gallery}
-      </a>`;
+      </button>`
+        : `<div class="card-media">${gallery}</div>`;
     return `<article class="card${fav ? " is-fav" : ""}${hideImages ? " card--no-media" : ""}" data-id="${id}"${ad.seller ? ` data-seller="${escapeHtml(ad.seller)}"` : ""}>
       ${mediaHtml}
       <div class="card-body">
         <div class="card-price-block">
           <div class="card-price">${escapeHtml(displayPrice(ad.price || "—"))}</div>
-          <button type="button" class="card-fav${fav ? " on" : ""}" data-action="fav" aria-label="${fav ? "Убрать из избранного" : "В избранное"}" title="${fav ? "Убрать из избранного" : "В избранное"}">
-            ${fav ? ICON_STAR : ICON_STAR_OUTLINE}
-          </button>
+          <div class="card-toolbar">
+            <a class="card-open" href="${escapeHtml(web)}" target="_blank" rel="noopener" title="Открыть на Avito" aria-label="Открыть на Avito">
+              ${ICON_EXT}
+            </a>
+            <button type="button" class="card-fav${fav ? " on" : ""}" data-action="fav" aria-label="${fav ? "Убрать из избранного" : "В избранное"}" title="${fav ? "Убрать из избранного" : "В избранное"}">
+              ${fav ? ICON_STAR : ICON_STAR_OUTLINE}
+            </button>
+          </div>
         </div>
         <a class="card-title" href="${escapeHtml(web)}" target="_blank" rel="noopener">${escapeHtml(ad.title || "")}</a>
         ${meta ? `<div class="card-meta"${metaAttrs}>${escapeHtml(meta)}</div>` : ""}
@@ -424,13 +552,8 @@ export function mountMonitor(opts: {
           <button class="card-btn call${ad.can_call ? "" : " muted"}" type="button" data-action="call">
             ${ICON_PHONE}<span>${ad.can_call ? "Позвонить" : "Открыть"}</span>
           </button>
-          <button class="card-btn msg${ad.can_message ? "" : " muted"}" type="button" data-action="msg" ${ad.can_message ? "" : "disabled"}>
-            ${ICON_MSG}<span>Написать</span>
-          </button>
-          <a class="card-btn ghost open" href="${escapeHtml(web)}" target="_blank" rel="noopener" title="Открыть на Avito">
-            ${ICON_EXT}<span class="sr-only">Открыть</span>
-          </a>
         </div>
+        ${descriptionHtml}
       </div>
     </article>`;
   };
@@ -454,14 +577,19 @@ export function mountMonitor(opts: {
       void requestPhone(ad, callBtn);
     });
 
-    const msgBtn = card.querySelector('button[data-action="msg"]') as HTMLButtonElement | null;
-    msgBtn?.addEventListener("click", (ev) => {
+    const photoBtn = card.querySelector('button[data-action="zoom-photo"]') as HTMLButtonElement | null;
+    photoBtn?.addEventListener("click", (ev) => {
       ev.preventDefault();
-      if (!ad.can_message) {
-        window.open(itemWebUrl(ad), "_blank", "noopener");
-        return;
-      }
-      openMessenger(ad);
+      ev.stopPropagation();
+      const urls = ad.images?.filter(Boolean) || [];
+      if (urls.length) openImageLightbox(urls);
+    });
+
+    const descBtn = card.querySelector('button[data-action="toggle-desc"]') as HTMLButtonElement | null;
+    descBtn?.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      const open = descBtn.classList.toggle("open");
+      descBtn.setAttribute("aria-expanded", open ? "true" : "false");
     });
 
     const blockBtn = card.querySelector('button[data-action="block-seller"]') as HTMLButtonElement | null;
@@ -551,60 +679,122 @@ export function mountMonitor(opts: {
     syncSearchControls();
   };
 
-  const shortUrl = (url: string, max = 56): string => {
-    if (url.length <= max) return url;
-    return `${url.slice(0, max - 1)}…`;
+  const selectedSavedUrl = (): SavedUrl | undefined =>
+    savedUrls.find((item) => item.id === selectedSavedUrlId);
+
+  const urlDropdownFilter = (): string => {
+    const value = queryEl.value.trim();
+    if (!value || value.startsWith("http://") || value.startsWith("https://")) return "";
+    return value.toLowerCase();
+  };
+
+  const selectSavedUrl = (id: string | null, fillInput = true) => {
+    selectedSavedUrlId = id;
+    const item = selectedSavedUrl();
+    if (fillInput && item) {
+      queryEl.value = item.url;
+      syncQueryClear();
+    }
+    renderSavedUrls();
+    saveCache();
+  };
+
+  const syncSavedUrlFromInput = () => {
+    const value = queryEl.value.trim();
+    if (!value) {
+      if (selectedSavedUrlId) selectSavedUrl(null, false);
+      return;
+    }
+    const match = findSavedUrlByUrl(savedUrls, value);
+    if (match) {
+      if (selectedSavedUrlId !== match.id) selectSavedUrl(match.id, false);
+    } else if (selectedSavedUrlId) {
+      selectSavedUrl(null, false);
+    }
+  };
+
+  const setSavedUrlAddFormOpen = (open: boolean) => {
+    savedUrlAddForm.classList.toggle("hidden", !open);
+    savedUrlAddBtn.classList.toggle("hidden", open);
+    if (!open) {
+      savedUrlAddNameInput.value = "";
+      savedUrlAddUrlInput.value = "";
+    } else {
+      savedUrlAddNameInput.focus();
+    }
+  };
+
+  const renderUrlSearchDropdown = () => {
+    const filter = urlDropdownFilter();
+    const items = savedUrls.filter((item) => (
+      !filter || item.name.toLowerCase().includes(filter)
+    ));
+    if (!items.length) {
+      urlSearchDropdownList.innerHTML = '<p class="url-search-dropdown-empty">Нет сохранённых ссылок</p>';
+      return;
+    }
+    urlSearchDropdownList.innerHTML = items.map((item) => (
+      `<button type="button" class="url-search-dropdown-item${item.id === selectedSavedUrlId ? " active" : ""}" data-id="${escapeHtml(item.id)}">
+        ${escapeHtml(item.name)}
+      </button>`
+    )).join("");
+  };
+
+  const renderSavedUrls = () => {
+    const showUrlUi = searchMode === "url";
+    savedUrlsManage.classList.toggle("hidden", !showUrlUi);
+    savedUrlsLimit.classList.toggle("hidden", savedUrls.length < MAX_SAVED_URLS);
+    savedUrlAddBtn.disabled = monitoring || savedUrls.length >= MAX_SAVED_URLS;
+    if (savedUrls.length >= MAX_SAVED_URLS) setSavedUrlAddFormOpen(false);
+    renderUrlSearchDropdown();
+
+    savedUrlsList.innerHTML = savedUrls.map((item) => (
+      `<article class="saved-url-item" data-id="${escapeHtml(item.id)}">
+        <input type="text" class="field saved-url-item-name" value="${escapeHtml(item.name)}" maxlength="64" placeholder="Название" aria-label="Название" />
+        <input type="url" class="field saved-url-item-url" value="${escapeHtml(item.url)}" placeholder="https://www.avito.ru/..." aria-label="Ссылка" />
+        <button type="button" class="saved-url-item-delete" data-action="delete-saved-url" aria-label="Удалить" title="Удалить">×</button>
+      </article>`
+    )).join("");
+  };
+
+  const addSavedUrlFromForm = (): boolean => {
+    const name = savedUrlAddNameInput.value.trim();
+    const url = savedUrlAddUrlInput.value.trim();
+    if (!name || !url) {
+      setStatus("укажите название и ссылку", false, "error");
+      return false;
+    }
+    const result = addSavedUrl(savedUrls, name, url);
+    if (result.limitReached) {
+      setStatus(`Максимум ${MAX_SAVED_URLS} ссылок`, false, "error");
+      return false;
+    }
+    if (!result.item.id) {
+      setStatus("укажите название и ссылку", false, "error");
+      return false;
+    }
+    savedUrls = result.urls;
+    setSavedUrlAddFormOpen(false);
+    renderSavedUrls();
+    saveCache();
+    updateSettingsBtnState();
+    showToast(result.added ? `Ссылка «${result.item.name}» добавлена` : `Ссылка «${result.item.name}» обновлена`, "success");
+    return true;
   };
 
   const applySavedUrl = () => {
-    const has = Boolean(savedSearchUrl) && saveUrlCheck.checked;
-    urlSavedFold.classList.toggle("hidden", !has);
-    if (!has) {
-      setUrlSavedExpanded(false);
-      updateCollapsedUrlHint();
-      return;
-    }
-    savedUrlLink.href = savedSearchUrl;
-    savedUrlLink.textContent = savedSearchUrl;
-    savedUrlLink.title = savedSearchUrl;
-    urlSavedPreview.textContent = shortUrl(savedSearchUrl, 42);
-    updateCollapsedUrlHint();
-  };
-
-  const updateCollapsedUrlHint = () => {
-    const collapsed = searchFields.classList.contains("hidden");
-    const show = collapsed && searchMode === "url" && Boolean(savedSearchUrl);
-    searchFiltersUrl.classList.toggle("hidden", !show);
-    if (!show) {
-      searchFiltersUrl.textContent = "";
-      searchFiltersUrl.removeAttribute("href");
-      return;
-    }
-    searchFiltersUrl.href = savedSearchUrl;
-    searchFiltersUrl.textContent = shortUrl(savedSearchUrl);
-    searchFiltersUrl.title = savedSearchUrl;
+    renderSavedUrls();
   };
 
   const updateUrlOptions = () => {
-    if (searchMode === "url" && savedSearchUrl && saveUrlCheck.checked && !queryEl.value.trim()) {
-      queryEl.value = savedSearchUrl;
+    if (searchMode === "url" && selectedSavedUrlId) {
+      const item = selectedSavedUrl();
+      if (item && !queryEl.value.trim()) {
+        queryEl.value = item.url;
+      }
     }
     syncQueryClear();
     applySavedUrl();
-  };
-
-  const persistSavedUrl = (url: string) => {
-    if (searchMode !== "url" || !saveUrlCheck.checked) {
-      if (!saveUrlCheck.checked) {
-        savedSearchUrl = "";
-        applySavedUrl();
-        saveCache();
-      }
-      return;
-    }
-    savedSearchUrl = url;
-    applySavedUrl();
-    saveCache();
   };
 
   const setSearchMode = (mode: SearchMode) => {
@@ -614,9 +804,8 @@ export function mountMonitor(opts: {
     regionWrap.classList.toggle("hidden", mode === "url");
     searchSettingsCats.classList.toggle("hidden", mode === "url");
     searchSettingsUrl.classList.toggle("hidden", mode !== "url");
-    if (mode !== "url") setUrlSavedExpanded(false);
     queryEl.placeholder = mode === "url"
-      ? "https://www.avito.ru/..."
+      ? "Вставьте ссылку или выберите из списка"
       : "Поиск по объявлениям";
     queryEl.type = "search";
     if (mode === "url") {
@@ -628,49 +817,49 @@ export function mountMonitor(opts: {
     }
     syncQueryClear();
     updateUrlOptions();
+    syncQueryFieldVisibility();
+    syncIphoneSectionVisibility();
+    if (mode === "url") {
+      openFilterSection("search-settings-url");
+    }
     updateSettingsBtnState();
+    syncSearchControls();
     saveCache();
   };
 
   const setMonitoring = (on: boolean) => {
     monitoring = on;
     syncSearchControls();
+    syncSearchStatus();
+  };
+
+  const resolveCategory = (id: string): Category => {
+    const legacy = id === "none" || id === "electronics" || id === "phones";
+    const normalizedId = legacy ? DEFAULT_CATEGORY_ID : id;
+    const known = categories.find((item) => item.id === normalizedId);
+    if (known) return known;
+    return categories[0] ?? { id: DEFAULT_CATEGORY_ID, name: "Смартфоны Apple" };
   };
 
   const renderCats = (items?: Category[]) => {
     if (items?.length) categories = items;
+    category = resolveCategory(category.id);
     catsEl.innerHTML = categories.map((item) => (
-      `<button type="button" class="chip${item.id === category.id ? " active" : ""}" data-id="${escapeHtml(item.id)}" data-name="${escapeHtml(item.name)}">
-        <span class="mark">${CHECK}</span>${escapeHtml(item.name)}
+      `<button type="button" class="multi-select-choice${item.id === category.id ? " active" : ""}" data-id="${escapeHtml(item.id)}" data-name="${escapeHtml(item.name)}" role="option" aria-selected="${item.id === category.id ? "true" : "false"}">
+        <span class="multi-select-choice-label">${escapeHtml(item.name)}</span>
+        <svg class="multi-select-choice-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true">
+          <path d="M5 12.5 10 17.5 19 7"></path>
+        </svg>
       </button>`
     )).join("");
+    categoryLabel.textContent = category.name;
+    syncIphoneSectionVisibility();
     updateSettingsBtnState();
     syncSearchControls();
   };
 
-  const setSearchPanelVisible = (visible: boolean) => {
-    searchFields.classList.toggle("hidden", !visible);
-    searchActions.classList.toggle("hidden", !visible);
-    searchActionsBlock.classList.toggle("is-collapsed", !visible);
-    searchFiltersLabel.classList.toggle("hidden", visible);
-    searchBody.classList.toggle("is-collapsed", !visible);
-    updateCollapsedUrlHint();
-    toggleSearchBtn.classList.toggle("collapsed", !visible);
-    toggleSearchBtn.setAttribute("aria-label", visible ? "Скрыть фильтры" : "Показать фильтры");
-    toggleSearchBtn.title = visible ? "Скрыть фильтры" : "Показать фильтры";
-    try {
-      localStorage.setItem(PANEL_KEY, visible ? "open" : "closed");
-    } catch {
-      /* empty */
-    }
-  };
-
   const loadSearchPanelState = () => {
-    try {
-      setSearchPanelVisible(localStorage.getItem(PANEL_KEY) !== "closed");
-    } catch {
-      setSearchPanelVisible(true);
-    }
+    setFiltersDrawerOpen(false);
   };
 
   const loadRegions = async (needle: string) => {
@@ -690,38 +879,39 @@ export function mountMonitor(opts: {
       return;
     }
     const value = queryEl.value.trim();
-    if (!value) {
-      setStatus(searchMode === "url" ? "вставьте ссылку Avito" : "введите поисковый запрос", false, "error");
+    if (searchMode === "url" && !value) {
+      setStatus("вставьте ссылку Avito", false, "error");
       queryEl.focus();
       return;
     }
-    if (!selectedIphoneModels.length) {
+    if (isIphoneCategorySelected() && !selectedIphoneModels.length) {
       setStatus("выберите хотя бы одну модель iPhone", false, "error");
-      setSettingsOpen(true);
+      openFilterSection("search-settings-iphone");
       return;
     }
     setBusy(true);
     setStatus("готовлю поиск…", false);
     try {
+      const iphonePayload = isIphoneCategorySelected() ? iphoneModelsToPayload(selectedIphoneModels) : undefined;
       const data = await api.startSearch(
         searchMode === "url"
-          ? { mode: "url", url: value, seller_skip: loadSellerBlacklist(), iphone_models: iphoneModelsToGens(selectedIphoneModels) }
+          ? { mode: "url", url: value, seller_skip: loadSellerBlacklist(), iphone_models: iphonePayload }
           : {
             mode: "query",
-            query: value,
+            query: "",
             region: region.slug,
             category: category.id,
             seller_skip: loadSellerBlacklist(),
-            iphone_models: iphoneModelsToGens(selectedIphoneModels),
+            iphone_models: iphonePayload,
           },
       );
       setMonitoring(true);
       if (data.search_mode === "url" || data.search_mode === "query") {
         setSearchMode(data.search_mode);
       }
-      if (data.query) queryEl.value = data.query;
-      if (data.search_mode === "url") {
-        persistSavedUrl(data.query || value);
+      if (data.search_mode === "url" && data.query) {
+        queryEl.value = data.query;
+        syncSavedUrlFromInput();
       }
       if (data.region) {
         region = data.region;
@@ -734,7 +924,7 @@ export function mountMonitor(opts: {
       }
       saveCache();
       clearFeed();
-      setSearchPanelVisible(false);
+      setFiltersDrawerOpen(false);
       setStatus("поиск запущен", true);
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err), false, "error");
@@ -782,7 +972,30 @@ export function mountMonitor(opts: {
     setSearchMode(searchMode);
     renderCats();
     $("search-form").addEventListener("submit", (ev) => { ev.preventDefault(); });
-    queryEl.addEventListener("input", syncQueryClear);
+    queryEl.addEventListener("input", () => {
+      syncQueryClear();
+      if (searchMode === "url") {
+        syncSavedUrlFromInput();
+        renderUrlSearchDropdown();
+        if (queryEl.value.trim().startsWith("http")) {
+          setUrlSearchDropdownOpen(false);
+        } else if (document.activeElement === queryEl) {
+          setUrlSearchDropdownOpen(true);
+        }
+      }
+    });
+    queryEl.addEventListener("focus", () => {
+      if (monitoring || searchMode !== "url" || !savedUrls.length) return;
+      renderUrlSearchDropdown();
+      setUrlSearchDropdownOpen(true);
+    });
+    queryEl.addEventListener("blur", () => {
+      window.setTimeout(() => {
+        if (!urlSearchCombo.contains(document.activeElement)) {
+          setUrlSearchDropdownOpen(false);
+        }
+      }, 120);
+    });
     queryClearBtn.addEventListener("click", () => {
       if (monitoring) return;
       queryEl.value = "";
@@ -799,10 +1012,21 @@ export function mountMonitor(opts: {
       setSearchMode("url");
     });
     stopBtn.addEventListener("click", () => { void stopSearch(); });
-    toggleSearchBtn.addEventListener("click", () => {
-      setSearchPanelVisible(searchFields.classList.contains("hidden"));
+    filtersOpenBtn.addEventListener("click", () => {
+      setFiltersDrawerOpen(!filtersDrawerBack.classList.contains("open"));
     });
+    filtersCloseBtn.addEventListener("click", () => setFiltersDrawerOpen(false));
+    filtersDrawerBack.addEventListener("click", (ev) => {
+      if (ev.target === filtersDrawerBack) setFiltersDrawerOpen(false);
+    });
+    filtersDrawer.addEventListener("click", (ev) => ev.stopPropagation());
     loadSearchPanelState();
+    syncSearchStatus();
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape" && filtersDrawerBack.classList.contains("open")) {
+        setFiltersDrawerOpen(false);
+      }
+    });
     hideImagesCheck.addEventListener("change", () => {
       if (monitoring) return;
       hideImages = hideImagesCheck.checked;
@@ -810,45 +1034,105 @@ export function mountMonitor(opts: {
       updateSettingsBtnState();
       saveCache();
     });
-    saveUrlCheck.addEventListener("change", () => {
+    savedUrlAddBtn.addEventListener("click", () => {
+      if (monitoring || savedUrls.length >= MAX_SAVED_URLS) return;
+      setSavedUrlAddFormOpen(true);
+    });
+    savedUrlAddCancelBtn.addEventListener("click", () => {
       if (monitoring) return;
-      updateSettingsBtnState();
-      if (!saveUrlCheck.checked) {
-        savedSearchUrl = "";
-        applySavedUrl();
-      } else {
-        const current = queryEl.value.trim();
-        if (current) persistSavedUrl(current);
+      setSavedUrlAddFormOpen(false);
+    });
+    savedUrlAddConfirmBtn.addEventListener("click", () => {
+      if (monitoring) return;
+      addSavedUrlFromForm();
+    });
+    savedUrlAddForm.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        if (!monitoring) addSavedUrlFromForm();
       }
+    });
+    urlSearchDropdownList.addEventListener("mousedown", (ev) => {
+      ev.preventDefault();
+    });
+    urlSearchDropdownList.addEventListener("click", (ev) => {
+      if (monitoring) return;
+      const btn = (ev.target as HTMLElement).closest(".url-search-dropdown-item") as HTMLButtonElement | null;
+      if (!btn?.dataset.id) return;
+      selectSavedUrl(btn.dataset.id);
+      setUrlSearchDropdownOpen(false);
+      queryEl.focus();
+    });
+    savedUrlsList.addEventListener("click", (ev) => {
+      if (monitoring) return;
+      const deleteBtn = (ev.target as HTMLElement).closest('[data-action="delete-saved-url"]') as HTMLButtonElement | null;
+      if (!deleteBtn) return;
+      const item = deleteBtn.closest(".saved-url-item") as HTMLElement | null;
+      if (!item?.dataset.id) return;
+      savedUrls = removeSavedUrl(savedUrls, item.dataset.id);
+      if (selectedSavedUrlId === item.dataset.id) {
+        selectedSavedUrlId = null;
+        if (findSavedUrlByUrl(savedUrls, queryEl.value.trim())) {
+          syncSavedUrlFromInput();
+        }
+      }
+      renderSavedUrls();
+      saveCache();
+      updateSettingsBtnState();
+    });
+    savedUrlsList.addEventListener("change", (ev) => {
+      if (monitoring) return;
+      const input = ev.target as HTMLInputElement;
+      if (!input.classList.contains("saved-url-item-name") && !input.classList.contains("saved-url-item-url")) return;
+      const item = input.closest(".saved-url-item") as HTMLElement | null;
+      if (!item?.dataset.id) return;
+      const nameInput = item.querySelector(".saved-url-item-name") as HTMLInputElement;
+      const urlInput = item.querySelector(".saved-url-item-url") as HTMLInputElement;
+      const next = updateSavedUrl(savedUrls, item.dataset.id, nameInput.value, urlInput.value);
+      if (next === savedUrls) return;
+      savedUrls = next;
+      if (selectedSavedUrlId === item.dataset.id) {
+        queryEl.value = urlInput.value.trim();
+        syncQueryClear();
+      }
+      renderSavedUrls();
       saveCache();
     });
-    iphoneModelsEl.addEventListener("click", (ev) => {
+    iphoneModelsTrigger.addEventListener("click", (ev) => {
       if (monitoring) return;
-      const btn = (ev.target as HTMLElement).closest("button.iphone-chip[data-id]") as HTMLButtonElement | null;
-      if (!btn) return;
-      const id = btn.dataset.id || "";
-      if (!DEFAULT_IPHONE_MODELS.includes(id)) return;
-      if (selectedIphoneModels.includes(id)) {
-        selectedIphoneModels = selectedIphoneModels.filter((item) => item !== id);
-      } else {
-        selectedIphoneModels = [...selectedIphoneModels, id].sort(
-          (a, b) => DEFAULT_IPHONE_MODELS.indexOf(a) - DEFAULT_IPHONE_MODELS.indexOf(b),
-        );
-      }
-      renderIphoneModels();
-      persistIphoneModels();
+      ev.stopPropagation();
+      const open = !iphoneModelsPanel.classList.contains("open");
+      if (open) setCategoryPanelOpen(false);
+      setIphoneModelsPanelOpen(open);
     });
-    iphoneModelsAllBtn.addEventListener("click", () => {
+    iphoneModelsEl.addEventListener("change", (ev) => {
+      if (monitoring) return;
+      const input = ev.target as HTMLInputElement;
+      if (input.type !== "checkbox") return;
+      const id = input.value;
+      if (!DEFAULT_IPHONE_MODELS.includes(id)) return;
+      if (input.checked) {
+        if (!selectedIphoneModels.includes(id)) {
+          selectedIphoneModels = [...selectedIphoneModels, id].sort(
+            (a, b) => DEFAULT_IPHONE_MODELS.indexOf(a) - DEFAULT_IPHONE_MODELS.indexOf(b),
+          );
+        }
+      } else {
+        selectedIphoneModels = selectedIphoneModels.filter((item) => item !== id);
+      }
+      iphoneModelsLabel.textContent = iphoneModelsSummary(selectedIphoneModels);
+      persistIphoneModels();
+      updateSettingsBtnState();
+    });
+    iphoneModelsAllBtn.addEventListener("click", (ev) => {
+      ev.preventDefault();
       if (monitoring) return;
       setIphoneModels([...DEFAULT_IPHONE_MODELS]);
     });
-    iphoneModelsNoneBtn.addEventListener("click", () => {
+    iphoneModelsNoneBtn.addEventListener("click", (ev) => {
+      ev.preventDefault();
       if (monitoring) return;
       setIphoneModels([]);
-    });
-    urlSavedFoldBtn.addEventListener("click", () => {
-      if (monitoring) return;
-      setUrlSavedExpanded(savedUrlBox.classList.contains("hidden"));
     });
     regionBtn.addEventListener("click", (ev) => {
       if (monitoring) return;
@@ -861,23 +1145,27 @@ export function mountMonitor(opts: {
       }
     });
     regionQuery.addEventListener("input", () => { void loadRegions(regionQuery.value); });
+    bindFilterSectionToggle("filter-toggle-cats", "search-settings-cats");
+    bindFilterSectionToggle("filter-toggle-iphone", "search-settings-iphone");
+    bindFilterSectionToggle("filter-toggle-url", "search-settings-url");
+    bindFilterSectionToggle("filter-toggle-display", "search-settings-display");
+    categoryTrigger.addEventListener("click", (ev) => {
+      if (monitoring) return;
+      ev.stopPropagation();
+      const open = !categoryPanel.classList.contains("open");
+      if (open) setIphoneModelsPanelOpen(false);
+      setCategoryPanelOpen(open);
+    });
     catsEl.addEventListener("click", (ev) => {
       if (monitoring) return;
-      const btn = (ev.target as HTMLElement).closest("button.chip") as HTMLButtonElement | null;
+      const btn = (ev.target as HTMLElement).closest("button.multi-select-choice") as HTMLButtonElement | null;
       if (!btn) return;
-      category = { id: btn.dataset.id || "none", name: btn.dataset.name || "" };
+      category = { id: btn.dataset.id || DEFAULT_CATEGORY_ID, name: btn.dataset.name || "" };
+      queryEl.value = "";
+      syncQueryClear();
       saveCache();
       renderCats();
-    });
-    searchSettingsBtn.addEventListener("click", (ev) => {
-      if (monitoring) return;
-      ev.stopPropagation();
-      const open = !searchSettingsPop.classList.contains("open");
-      setSettingsOpen(open);
-      if (open) regionPop.classList.remove("open");
-    });
-    searchSettingsPop.addEventListener("click", (ev) => {
-      ev.stopPropagation();
+      setCategoryPanelOpen(false);
     });
     regionList.addEventListener("click", (ev) => {
       if (monitoring) return;
@@ -892,15 +1180,17 @@ export function mountMonitor(opts: {
     });
     document.addEventListener("click", (ev) => {
       const target = ev.target as Node;
-      const path = ev.composedPath();
       if (!regionPop.contains(target) && target !== regionBtn && !regionBtn.contains(target)) {
         regionPop.classList.remove("open");
       }
-      const insideSettings = path.some(
-        (node) => node === searchSettingsPop || node === searchSettingsBtn,
-      );
-      if (!insideSettings) {
-        setSettingsOpen(false);
+      if (!categoryWrap.contains(target)) {
+        setCategoryPanelOpen(false);
+      }
+      if (!iphoneModelsWrap.contains(target)) {
+        setIphoneModelsPanelOpen(false);
+      }
+      if (!urlSearchCombo.contains(target)) {
+        setUrlSearchDropdownOpen(false);
       }
     });
     void refreshAvitoSession();
@@ -949,10 +1239,9 @@ export function mountMonitor(opts: {
         if (data.search_mode === "url" || data.search_mode === "query") {
           setSearchMode(data.search_mode);
         }
-        if (data.query) queryEl.value = data.query;
-        if (data.search_mode === "url" && data.query) {
-          savedSearchUrl = saveUrlCheck.checked ? data.query : savedSearchUrl;
-          applySavedUrl();
+        if (data.query && data.search_mode === "url") {
+          queryEl.value = data.query;
+          syncSavedUrlFromInput();
         }
         if (data.region?.slug) {
           region = data.region;
@@ -965,7 +1254,7 @@ export function mountMonitor(opts: {
         }
         saveCache();
         setMonitoring(true);
-        setSearchPanelVisible(false);
+        setFiltersDrawerOpen(false);
         setStatus("поиск запущен", true);
         void api.ads().then((ads) => addBatch(ads, false));
       }
@@ -983,5 +1272,6 @@ export function mountMonitor(opts: {
       app.classList.add("hidden");
     },
     openAvito: openAvitoModal,
+    closeFilters: () => setFiltersDrawerOpen(false),
   };
 }

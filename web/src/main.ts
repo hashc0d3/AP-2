@@ -8,15 +8,29 @@ initTheme();
 
 let monitorRef: ReturnType<typeof mountMonitor> | null = null;
 
-const userMenu = mountUserMenu({
-  onAvitoClick: () => monitorRef?.openAvito(),
-});
+let userMenuRef: ReturnType<typeof mountUserMenu> | null = null;
 
 const monitor = mountMonitor({
-  isPushEnabled: () => userMenu.isPushEnabled(),
-  onAvitoStatus: (connected, label) => userMenu.setAvitoStatus(connected, label),
+  isPushEnabled: () => userMenuRef?.isPushEnabled() ?? false,
+  onAvitoStatus: (connected, label) => userMenuRef?.setAvitoStatus(connected, label),
+  closeUserMenu: () => userMenuRef?.close(),
 });
 monitorRef = monitor;
+
+userMenuRef = mountUserMenu({
+  onAvitoClick: () => monitorRef?.openAvito(),
+  onLogout: () => {
+    void api.logout().then(() => {
+      authBtn.classList.remove("hidden");
+      shellUser.classList.add("hidden");
+      shellAppTools.classList.add("hidden");
+      app.classList.add("hidden");
+      monitor.closeFilters();
+      showAuth();
+    });
+  },
+  closeFiltersDrawer: () => monitor.closeFilters(),
+});
 
 const app = document.getElementById("app") as HTMLElement;
 const authModal = document.getElementById("auth-modal") as HTMLElement;
@@ -25,13 +39,16 @@ const authPassword = document.getElementById("auth-password") as HTMLInputElemen
 const authSubmit = document.getElementById("auth-submit") as HTMLButtonElement;
 const authHint = document.getElementById("auth-hint") as HTMLElement;
 const authBtn = document.getElementById("auth-btn") as HTMLButtonElement;
-const shellUser = document.getElementById("shell-user") as HTMLElement;
+  const shellUser = document.getElementById("shell-user") as HTMLElement;
+  const shellAppTools = document.getElementById("shell-app-tools") as HTMLElement;
 
 function showAuth(): void {
   authModal.classList.remove("hidden");
   app.classList.add("hidden");
   shellUser.classList.add("hidden");
-  userMenu.close();
+  shellAppTools.classList.add("hidden");
+  authBtn.classList.remove("hidden");
+  userMenuRef?.close();
   authHint.textContent = "";
   authPassword.value = "";
 }
@@ -39,9 +56,10 @@ function showAuth(): void {
 function showApp(username: string): void {
   authModal.classList.add("hidden");
   app.classList.remove("hidden");
-  userMenu.setUsername(username);
+  userMenuRef?.setUsername(username);
   shellUser.classList.remove("hidden");
-  authBtn.textContent = "Выйти";
+  shellAppTools.classList.remove("hidden");
+  authBtn.classList.add("hidden");
   monitor.show();
 }
 
@@ -59,12 +77,7 @@ authSubmit.addEventListener("click", () => {
 });
 
 authBtn.addEventListener("click", () => {
-  void api.logout().then(() => {
-    authBtn.textContent = "Войти";
-    shellUser.classList.add("hidden");
-    app.classList.add("hidden");
-    showAuth();
-  });
+  showAuth();
 });
 
 document.getElementById("auth-form")?.addEventListener("submit", (ev) => {
