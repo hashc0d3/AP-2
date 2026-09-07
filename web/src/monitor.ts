@@ -13,6 +13,15 @@ import {
   syncSellerBlacklist,
 } from "./seller-blacklist";
 import { showToast, type ToastKind } from "./toast";
+import {
+  DEFAULT_IPHONE_MODELS,
+  IPHONE_MODELS,
+  iphoneModelsToGens,
+  isDefaultIphoneSelection,
+  loadIphoneModels,
+  normalizeIphoneModels,
+  saveIphoneModels,
+} from "./iphone-models";
 import type { Ad, Category, Region, SearchMode } from "./types";
 
 const CACHE_KEY = "parser1.search";
@@ -54,6 +63,9 @@ export function mountMonitor(opts: {
   const searchSettingsBtn = $("search-settings-btn") as HTMLButtonElement;
   const searchSettingsPop = $("search-settings-pop");
   const searchSettingsCats = $("search-settings-cats");
+  const iphoneModelsEl = $("iphone-models");
+  const iphoneModelsAllBtn = $("iphone-models-all") as HTMLButtonElement;
+  const iphoneModelsNoneBtn = $("iphone-models-none") as HTMLButtonElement;
   const searchSettingsUrl = $("search-settings-url");
   const saveUrlCheck = input("save-url");
   const hideImagesCheck = input("hide-images");
@@ -97,11 +109,35 @@ export function mountMonitor(opts: {
   let started = false;
   let events: EventSource | null = null;
   let avitoConnected = false;
+  let selectedIphoneModels = loadIphoneModels();
   const phoneCache = new Map<string, string>();
 
   const updateSettingsBtnState = () => {
     const urlActive = searchMode === "url" && (saveUrlCheck.checked || Boolean(savedSearchUrl));
-    searchSettingsBtn.classList.toggle("active", category.id !== "none" || urlActive || hideImages);
+    const iphoneFilterActive = !isDefaultIphoneSelection(selectedIphoneModels);
+    searchSettingsBtn.classList.toggle("active", category.id !== "none" || urlActive || hideImages || iphoneFilterActive);
+  };
+
+  const persistIphoneModels = () => {
+    saveIphoneModels(selectedIphoneModels);
+    saveCache();
+    updateSettingsBtnState();
+  };
+
+  const renderIphoneModels = () => {
+    const selected = new Set(selectedIphoneModels);
+    iphoneModelsEl.innerHTML = `<div class="cat-row iphone-model-row">${IPHONE_MODELS.map((item) => (
+      `<button type="button" class="chip iphone-chip${selected.has(item.id) ? " active" : ""}" data-id="${escapeHtml(item.id)}" aria-pressed="${selected.has(item.id) ? "true" : "false"}">
+        <span class="mark">${CHECK}</span>${escapeHtml(item.label)}
+      </button>`
+    )).join("")}</div>`;
+    updateSettingsBtnState();
+  };
+
+  const setIphoneModels = (models: string[]) => {
+    selectedIphoneModels = normalizeIphoneModels(models);
+    renderIphoneModels();
+    persistIphoneModels();
   };
 
   const applyHideImages = () => {
@@ -143,6 +179,11 @@ export function mountMonitor(opts: {
     catsEl.querySelectorAll("button.chip").forEach((btn) => {
       (btn as HTMLButtonElement).disabled = locked;
     });
+    iphoneModelsEl.querySelectorAll("button.iphone-chip").forEach((btn) => {
+      (btn as HTMLButtonElement).disabled = locked;
+    });
+    iphoneModelsAllBtn.disabled = locked;
+    iphoneModelsNoneBtn.disabled = locked;
     regionList.querySelectorAll("button[data-slug]").forEach((btn) => {
       (btn as HTMLButtonElement).disabled = locked;
     });
@@ -200,11 +241,24 @@ export function mountMonitor(opts: {
     }
   };
 
-  const dialPhone = (phone: string) => {
+  const dialPhone = (phone: string, targetWindow: Window | null = null) => {
+    const tel = phone.trim().replace(/[^\d+]/g, "") || phone.trim();
+    const href = `tel:${tel}`;
+    if (targetWindow && !targetWindow.closed) {
+      try {
+        targetWindow.location.href = href;
+        return;
+      } catch {
+        /* fallback below */
+      }
+    }
     const link = document.createElement("a");
-    link.href = `tel:${phone}`;
-    link.rel = "noopener";
+    link.href = href;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    document.body.appendChild(link);
     link.click();
+    link.remove();
   };
 
   const requestPhone = async (ad: Ad, btn: HTMLButtonElement) => {
@@ -227,15 +281,17 @@ export function mountMonitor(opts: {
     btn.disabled = true;
     if (label) label.textContent = "…";
     else btn.textContent = "…";
+    const callTab = window.open("about:blank", "_blank", "noopener,noreferrer");
     try {
       const result = await api.avitoPhone(id);
       if (result.ok && result.phone) {
         phoneCache.set(id, result.phone);
         if (label) label.textContent = result.phone;
         else btn.textContent = result.phone;
-        dialPhone(result.phone);
+        dialPhone(result.phone, callTab);
         return;
       }
+      callTab?.close();
       const message = result.error || "Номер недоступен";
       if (result.code === "no_session" || result.code === "not_logged_in" || result.code === "auth_required") {
         setAvitoSession(false);
@@ -246,6 +302,7 @@ export function mountMonitor(opts: {
       if (label) label.textContent = prev;
       else btn.textContent = prev;
     } catch (err) {
+      callTab?.close();
       window.alert(err instanceof Error ? err.message : String(err));
       if (label) label.textContent = prev;
       else btn.textContent = prev;
@@ -263,6 +320,7 @@ export function mountMonitor(opts: {
         savedSearchUrl?: string;
         saveSearchUrl?: boolean;
         hideImages?: boolean;
+        iphoneModels?: string[];
       };
       if (data.searchMode === "query" || data.searchMode === "url") {
         searchMode = data.searchMode;
@@ -271,6 +329,12 @@ export function mountMonitor(opts: {
       saveUrlCheck.checked = data.saveSearchUrl !== false;
       hideImages = data.hideImages === true;
       hideImagesCheck.checked = hideImages;
+      if (Array.isArray(data.iphoneModels)) {
+        selectedIphoneModels = normalizeIphoneModels(data.iphoneModels);
+      } else {
+        selectedIphoneModels = loadIphoneModels();
+      }
+      renderIphoneModels();
       if (data.region?.slug && data.region.name) {
         region = { slug: String(data.region.slug), name: String(data.region.name) };
         regionLabel.textContent = region.name;
@@ -294,6 +358,7 @@ export function mountMonitor(opts: {
         savedSearchUrl: saveUrlCheck.checked ? savedSearchUrl : "",
         saveSearchUrl: saveUrlCheck.checked,
         hideImages,
+        iphoneModels: selectedIphoneModels,
       }));
     } catch {
       /* empty */
@@ -630,18 +695,24 @@ export function mountMonitor(opts: {
       queryEl.focus();
       return;
     }
+    if (!selectedIphoneModels.length) {
+      setStatus("выберите хотя бы одну модель iPhone", false, "error");
+      setSettingsOpen(true);
+      return;
+    }
     setBusy(true);
     setStatus("готовлю поиск…", false);
     try {
       const data = await api.startSearch(
         searchMode === "url"
-          ? { mode: "url", url: value, seller_skip: loadSellerBlacklist() }
+          ? { mode: "url", url: value, seller_skip: loadSellerBlacklist(), iphone_models: iphoneModelsToGens(selectedIphoneModels) }
           : {
             mode: "query",
             query: value,
             region: region.slug,
             category: category.id,
             seller_skip: loadSellerBlacklist(),
+            iphone_models: iphoneModelsToGens(selectedIphoneModels),
           },
       );
       setMonitoring(true);
@@ -707,6 +778,7 @@ export function mountMonitor(opts: {
     void syncSellerBlacklist();
     window.addEventListener(BLACKLIST_EVENT, () => purgeBlacklistedSellers());
     loadCache();
+    renderIphoneModels();
     setSearchMode(searchMode);
     renderCats();
     $("search-form").addEventListener("submit", (ev) => { ev.preventDefault(); });
@@ -750,6 +822,30 @@ export function mountMonitor(opts: {
       }
       saveCache();
     });
+    iphoneModelsEl.addEventListener("click", (ev) => {
+      if (monitoring) return;
+      const btn = (ev.target as HTMLElement).closest("button.iphone-chip[data-id]") as HTMLButtonElement | null;
+      if (!btn) return;
+      const id = btn.dataset.id || "";
+      if (!DEFAULT_IPHONE_MODELS.includes(id)) return;
+      if (selectedIphoneModels.includes(id)) {
+        selectedIphoneModels = selectedIphoneModels.filter((item) => item !== id);
+      } else {
+        selectedIphoneModels = [...selectedIphoneModels, id].sort(
+          (a, b) => DEFAULT_IPHONE_MODELS.indexOf(a) - DEFAULT_IPHONE_MODELS.indexOf(b),
+        );
+      }
+      renderIphoneModels();
+      persistIphoneModels();
+    });
+    iphoneModelsAllBtn.addEventListener("click", () => {
+      if (monitoring) return;
+      setIphoneModels([...DEFAULT_IPHONE_MODELS]);
+    });
+    iphoneModelsNoneBtn.addEventListener("click", () => {
+      if (monitoring) return;
+      setIphoneModels([]);
+    });
     urlSavedFoldBtn.addEventListener("click", () => {
       if (monitoring) return;
       setUrlSavedExpanded(savedUrlBox.classList.contains("hidden"));
@@ -780,6 +876,9 @@ export function mountMonitor(opts: {
       setSettingsOpen(open);
       if (open) regionPop.classList.remove("open");
     });
+    searchSettingsPop.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+    });
     regionList.addEventListener("click", (ev) => {
       if (monitoring) return;
       const btn = (ev.target as HTMLElement).closest("button[data-slug]") as HTMLButtonElement | null;
@@ -793,13 +892,14 @@ export function mountMonitor(opts: {
     });
     document.addEventListener("click", (ev) => {
       const target = ev.target as Node;
+      const path = ev.composedPath();
       if (!regionPop.contains(target) && target !== regionBtn && !regionBtn.contains(target)) {
         regionPop.classList.remove("open");
       }
-      if (!searchSettingsPop.contains(target)
-        && target !== searchSettingsBtn
-        && !searchSettingsBtn.contains(target)
-        && !searchFieldWrap.contains(target)) {
+      const insideSettings = path.some(
+        (node) => node === searchSettingsPop || node === searchSettingsBtn,
+      );
+      if (!insideSettings) {
         setSettingsOpen(false);
       }
     });

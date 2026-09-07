@@ -1085,6 +1085,71 @@ html[data-theme="light"] .toast {
   padding-bottom: 0;
 }
 
+.search-settings-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.625rem;
+}
+
+.search-settings-title-row .search-settings-title {
+  margin: 0;
+}
+
+.iphone-model-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.iphone-model-action {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-brand);
+  cursor: pointer;
+}
+
+.iphone-model-action:hover {
+  text-decoration: underline;
+}
+
+.search-settings-pop:has(.iphone-model-groups) {
+  left: auto;
+  width: min(20rem, calc(100vw - 2rem));
+}
+
+.iphone-model-groups {
+  padding-top: 0.125rem;
+}
+
+.iphone-model-row {
+  margin-top: 0;
+  padding-bottom: 0;
+  flex-wrap: wrap;
+}
+
+.iphone-model-row .iphone-chip {
+  min-width: 2.75rem;
+  justify-content: center;
+  height: 2rem;
+  padding-inline: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.iphone-model-row .iphone-chip .mark {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+.iphone-model-row .iphone-chip .mark svg {
+  width: 0.625rem;
+  height: 0.625rem;
+}
+
 .search-settings-check {
   display: flex;
   align-items: center;

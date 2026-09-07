@@ -3,19 +3,26 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from pathlib import Path
 
 from loguru import logger
 
+from settings import load_env
+
 STORAGE_DIR = Path("storage")
 SESSION_PATH = STORAGE_DIR / "app_login.json"
 
-LOGIN_USER = "sotik77"
-LOGIN_PASSWORD = "admin77!"
-
 _lock = threading.RLock()
+
+
+def _credentials() -> tuple[str, str]:
+    load_env()
+    login = os.environ.get("APP_LOGIN", "admin").strip()
+    password = os.environ.get("APP_PASSWORD", "change_me")
+    return login, password
 
 
 def _read_session() -> dict:
@@ -34,27 +41,30 @@ def _write_session(data: dict) -> None:
 
 
 def is_authenticated() -> bool:
+    login_user, _ = _credentials()
     with _lock:
         session = _read_session()
-        return bool(session.get("logged_in") and session.get("username") == LOGIN_USER)
+        return bool(session.get("logged_in") and session.get("username") == login_user)
 
 
 def auth_status() -> dict:
+    login_user, _ = _credentials()
     authed = is_authenticated()
     return {
         "logged_in": authed,
-        "username": LOGIN_USER if authed else "",
+        "username": login_user if authed else "",
         "active": authed,
     }
 
 
 def login(username: str, password: str) -> dict:
+    login_user, login_password = _credentials()
     user = (username or "").strip()
-    if user != LOGIN_USER or password != LOGIN_PASSWORD:
+    if user != login_user or password != login_password:
         raise ValueError("Неверный логин или пароль")
     with _lock:
-        _write_session({"logged_in": True, "username": LOGIN_USER, "at": time.time()})
-        logger.info(f"Вход: {LOGIN_USER}")
+        _write_session({"logged_in": True, "username": login_user, "at": time.time()})
+        logger.info(f"Вход: {login_user}")
         return auth_status()
 
 

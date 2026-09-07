@@ -52,8 +52,8 @@ export function mountUserMenu(opts: UserMenuOptions): {
   const themePill = document.getElementById("theme-toggle-pill") as HTMLElement;
   const themeIconSun = themeBtn.querySelector(".theme-icon-sun") as SVGElement;
   const themeIconMoon = themeBtn.querySelector(".theme-icon-moon") as SVGElement;
-  const spfaBalanceHint = document.getElementById("user-menu-spfa-balance-hint") as HTMLElement;
-  const spfaBalanceValue = document.getElementById("user-menu-spfa-balance-value") as HTMLElement;
+  const resourceBalanceHint = document.getElementById("user-menu-resource-balance-hint") as HTMLElement;
+  const resourceBalanceValue = document.getElementById("user-menu-resource-balance-value") as HTMLElement;
   const tabSettings = document.getElementById("user-tab-settings") as HTMLButtonElement;
   const tabBlacklist = document.getElementById("user-tab-blacklist") as HTMLButtonElement;
   const panelSettings = document.getElementById("user-panel-settings") as HTMLElement;
@@ -70,17 +70,17 @@ export function mountUserMenu(opts: UserMenuOptions): {
   const refreshBalance = async () => {
     if (balanceLoading) return;
     balanceLoading = true;
-    spfaBalanceValue.textContent = "…";
-    spfaBalanceHint.textContent = "Загрузка…";
+    resourceBalanceValue.textContent = "…";
+    resourceBalanceHint.textContent = "Загрузка…";
     try {
-      const data = await api.spfaBalance();
-      spfaBalanceValue.textContent = formatBalance(data.balance);
-      spfaBalanceHint.textContent = "Сервисный счёт";
-      spfaBalanceValue.classList.remove("error");
+      const data = await api.resourceBalance();
+      resourceBalanceValue.textContent = formatBalance(data.balance);
+      resourceBalanceHint.textContent = "Сервисный счёт";
+      resourceBalanceValue.classList.remove("error");
     } catch (err) {
-      spfaBalanceValue.textContent = "—";
-      spfaBalanceHint.textContent = err instanceof Error ? err.message : "Не удалось загрузить";
-      spfaBalanceValue.classList.add("error");
+      resourceBalanceValue.textContent = "—";
+      resourceBalanceHint.textContent = err instanceof Error ? err.message : "Не удалось загрузить";
+      resourceBalanceValue.classList.add("error");
     } finally {
       balanceLoading = false;
     }

@@ -1,10 +1,10 @@
 """Замеры скорости парсера: прокси, переиспользование клиента, смена IP, задержка выдачи.
 
-Примеры:
-    python bench_speed.py --probe 8
-    python bench_speed.py --api 5
-    python bench_speed.py --ipchange
-    python bench_speed.py --log logs/parser.log
+Примеры (из корня проекта):
+    python tools/bench_speed.py --probe 8
+    python tools/bench_speed.py --api 5
+    python tools/bench_speed.py --ipchange
+    python tools/bench_speed.py --log logs/parser.log
 """
 
 from __future__ import annotations
@@ -12,20 +12,19 @@ from __future__ import annotations
 import argparse
 import re
 import statistics
+import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import requests as std_requests
-import tomllib
 from curl_cffi import requests as curl_requests
+
+from settings import load_config
 
 PROBE_URL = "https://www.avito.ru/robots.txt"
 IP_URL = "https://api.ipify.org/?format=text"
-
-
-def load_config() -> dict:
-    with Path("config.toml").open("rb") as fh:
-        return tomllib.load(fh)["avito"]
 
 
 def proxies_for(proxy_string: str) -> dict:

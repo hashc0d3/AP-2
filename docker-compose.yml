@@ -4,6 +4,8 @@ services:
     image: parser1:latest
     container_name: parser1
     restart: unless-stopped
+    env_file:
+      - .env
     ports:
       - "${WEB_PORT:-8765}:8765"
     environment:

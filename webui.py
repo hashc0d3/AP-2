@@ -14,10 +14,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from avito_search import list_categories, preview, search_regions, set_seller_skip, snapshot, start_search, stop_search
-from avito_connect import connect_status, reset_connect, start_connect
-from avito_login import login_status, queue_code, queue_phone, reset_login
 from avito_user import clear_user_session, fetch_user_phone, normalize_import, save_user_session, session_status
-from spfa_price import batch_lookup_status, fetch_balance, start_batch_lookup
+from resource_api import fetch_balance
 from app_auth import auth_status, is_authenticated, login as app_login, logout as app_logout
 
 _DISCONNECT = (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, TimeoutError)
@@ -183,6 +181,9 @@ class Handler(BaseHTTPRequestHandler):
             if not self._serve_static(parsed.path.lstrip("/")):
                 self.send_error(404)
             return
+        if parsed.path == "/api/auth/status":
+            self._json(200, auth_status())
+            return
         if parsed.path == "/api/billing/status":
             self._json(200, auth_status())
             return
@@ -213,36 +214,23 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, body, "application/json; charset=utf-8")
             return
         if parsed.path == "/api/status":
-            self._json(200, snapshot() | {"subscription": auth_status()})
+            self._json(200, snapshot() | {"auth": auth_status()})
             return
         if parsed.path == "/api/avito/session":
             if not self._require_sub():
                 return
-            self._json(200, session_status() | {"connect": connect_status()})
+            self._json(200, session_status())
             return
-        if parsed.path == "/api/avito/connect/status":
+        if parsed.path == "/api/resource/balance":
             if not self._require_sub():
-                return
-            self._json(200, connect_status())
-            return
-        if parsed.path == "/api/avito/login/status":
-            if not self._require_sub():
-                return
-            self._json(200, login_status())
-            return
-        if parsed.path == "/api/price/batch":
-            if not self._require_sub():
-                return
-            task_id = (parse_qs(parsed.query).get("task_id") or [""])[0].strip()
-            if not task_id:
-                self._json(400, {"error": "Укажите task_id"})
                 return
             try:
-                data = batch_lookup_status(task_id)
+                data = fetch_balance()
             except ValueError as err:
                 self._json(400, {"error": str(err)})
                 return
             except RuntimeError as err:
+                logger.warning(f"Resource balance: {err}")
                 self._json(502, {"error": str(err)})
                 return
             self._json(200, data)
@@ -256,7 +244,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(400, {"error": str(err)})
                 return
             except RuntimeError as err:
-                logger.warning(f"SPFA balance: {err}")
+                logger.warning(f"Resource balance: {err}")
                 self._json(502, {"error": str(err)})
                 return
             self._json(200, data)
@@ -356,9 +344,6 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
-        if parsed.path == "/api/billing/sms":
-            self._json(404, {"error": "Недоступно"})
-            return
         if parsed.path == "/api/auth/login":
             try:
                 payload = self._read_json()
@@ -366,20 +351,8 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as err:
                 self._json(400, {"error": str(err)})
             return
-        if parsed.path == "/api/auth/verify":
-            self._json(404, {"error": "Недоступно"})
-            return
         if parsed.path == "/api/auth/logout":
             self._json(200, app_logout())
-            return
-        if parsed.path == "/api/billing/promo":
-            self._json(404, {"error": "Недоступно"})
-            return
-        if parsed.path == "/api/billing/trial":
-            self._json(404, {"error": "Недоступно"})
-            return
-        if parsed.path == "/api/billing/pay":
-            self._json(404, {"error": "Недоступно"})
             return
         if parsed.path == "/api/reset":
             if not self._require_sub():
@@ -418,17 +391,28 @@ class Handler(BaseHTTPRequestHandler):
             seller_skip = payload.get("seller_skip")
             if seller_skip is not None and not isinstance(seller_skip, list):
                 seller_skip = []
+            iphone_models = payload.get("iphone_models")
+            if iphone_models is not None and not isinstance(iphone_models, list):
+                iphone_models = None
             try:
                 if mode == "url":
                     data = start_search(
                         "",
                         "",
                         seller_skip=seller_skip,
+                        iphone_models=iphone_models,
                         mode="url",
                         web_url=url or query,
                     )
                 else:
-                    data = start_search(query, region, category, seller_skip=seller_skip, mode="query")
+                    data = start_search(
+                        query,
+                        region,
+                        category,
+                        seller_skip=seller_skip,
+                        iphone_models=iphone_models,
+                        mode="query",
+                    )
             except ValueError as err:
                 self._json(400, {"error": str(err)})
                 return
@@ -473,78 +457,6 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(400, {"error": str(err)})
                 return
             self._json(200, {"ok": True, **session_status(), "label": session.get("label")})
-            return
-        if parsed.path == "/api/avito/connect/reset":
-            if not self._require_sub():
-                return
-            self._json(200, reset_connect())
-            return
-        if parsed.path == "/api/avito/connect/start":
-            if not self._require_sub():
-                return
-            try:
-                data = start_connect()
-            except Exception as err:
-                self._json(502, {"error": str(err)})
-                return
-            self._json(200, data)
-            return
-        if parsed.path == "/api/avito/login/sms":
-            if not self._require_sub():
-                return
-            try:
-                payload = self._read_json()
-                data = queue_phone(str(payload.get("phone") or ""))
-            except ValueError as err:
-                self._json(400, {"error": str(err)})
-                return
-            except Exception as err:
-                self._json(502, {"error": str(err)})
-                return
-            self._json(200, data)
-            return
-        if parsed.path == "/api/avito/login/verify":
-            if not self._require_sub():
-                return
-            try:
-                payload = self._read_json()
-                data = queue_code(str(payload.get("code") or ""))
-            except ValueError as err:
-                self._json(400, {"error": str(err)})
-                return
-            except Exception as err:
-                self._json(502, {"error": str(err)})
-                return
-            self._json(200, data)
-            return
-        if parsed.path == "/api/avito/login/reset":
-            if not self._require_sub():
-                return
-            self._json(200, reset_login())
-            return
-        if parsed.path == "/api/price/batch":
-            if not self._require_sub():
-                return
-            try:
-                payload = self._read_json()
-            except ValueError:
-                self._json(400, {"error": "Некорректный JSON"})
-                return
-            queries = payload.get("queries") or payload.get("ads") or []
-            if not isinstance(queries, list):
-                self._json(400, {"error": "queries должен быть массивом"})
-                return
-            region = str(payload.get("region") or "all")
-            try:
-                data = start_batch_lookup([str(item) for item in queries], region)
-            except ValueError as err:
-                self._json(400, {"error": str(err)})
-                return
-            except RuntimeError as err:
-                logger.warning(f"SPFA batch_lookup: {err}")
-                self._json(502, {"error": str(err)})
-                return
-            self._json(200, data)
             return
         self.send_error(404)
 

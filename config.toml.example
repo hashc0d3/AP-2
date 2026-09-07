@@ -3,15 +3,7 @@
 url = "https://www.avito.ru/all/telefony?owner[]=private&s=104"
 api_url = "https://www.avito.ru/web/1/js/items?categoryId=84&owner%5B0%5D=private&presentationType=serp&privateOnly=1&sort=date"
 
-# Мобильный прокси
-proxy_string = "user:pass@mproxy.site:20085"
-socks5_proxy = "user:pass@bproxy.site:20085"
-proxy_change_url = "https://aproxy.site/?proxy_key=YOUR_PROXY_KEY"
-
-# API cookies (spfa.pro)
-cookies_api_key = "sk_live_YOUR_KEY"
-cookie_pool_size = 5
-cookie_unblock_pause = 60
+# Секреты — в .env (PROXY_STRING, COOKIES_API_KEY и т.д.)
 
 ignore_promotion = true
 seller_skip = ["re:premium"]
@@ -21,14 +13,17 @@ pages = 1
 pause_between_pages = 2
 title_must_contain = []
 title_skip = ["книга", "книг", "журнал", "комикс", "чехол", "кабель", "зарядк"]
+iphone_min_model = 0    # фильтр моделей — в настройках поиска (шестерёнка)
+iphone_max_model = 0
 
-# Скорость опроса. Обычный режим — poll_interval; если Avito отбивается
-# несколько циклов подряд, парсер сам откатывается к poll_interval_max.
-poll_interval = 4          # рабочий интервал обновления ленты (сек)
-poll_interval_max = 24     # куда откатываемся, если поймали бан
-per_cookie_interval = 12   # один набор cookies бьётся по Avito не чаще этого (сек)
-request_timeout = 10       # таймаут запроса к API: зависший запрос не должен держать цикл
-ip_change_wait = 12        # максимум ожидания готовности прокси после смены IP
-pause_general = 12         # пауза после неудачного цикла
+# Скорость опроса
+poll_interval = 4
+poll_interval_max = 24
+per_cookie_interval = 12
+request_timeout = 10
+ip_change_wait = 12
+pause_general = 12
 pause_max = 40
+cookie_pool_size = 5
+cookie_unblock_pause = 60
 web_port = 8765

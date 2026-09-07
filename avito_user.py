@@ -9,7 +9,8 @@ from pathlib import Path
 from loguru import logger
 
 from avito_phone import fetch_phone
-from parser import build_client, load_config
+from parser import build_client
+from settings import load_config
 
 SESSION_PATH = Path("storage") / "avito_user.json"
 _AUTH_COOKIE_KEYS = (

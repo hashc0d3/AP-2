@@ -49,7 +49,7 @@ authSubmit.addEventListener("click", () => {
   authSubmit.disabled = true;
   authHint.textContent = "";
   void api.login(authLogin.value, authPassword.value)
-    .then((status) => showApp(status.username || "sotik77"))
+    .then((status) => showApp(status.username || "admin"))
     .catch((err) => {
       authHint.textContent = err instanceof Error ? err.message : String(err);
     })
@@ -74,7 +74,7 @@ document.getElementById("auth-form")?.addEventListener("submit", (ev) => {
 
 void api.authStatus().then((status) => {
   if (status.logged_in) {
-    showApp(status.username || "sotik77");
+    showApp(status.username || "admin");
   } else {
     showAuth();
   }

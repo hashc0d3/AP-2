@@ -1,15 +1,18 @@
 """Проверка ротации cookies и расчёта интервала опроса. Сеть не нужна.
 
-Запуск: python test_parser_speed.py
+Запуск: python tests/test_parser_speed.py
 """
 
 from __future__ import annotations
 
 import json
 import shutil
+import sys
 import tempfile
 import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import cookie_pool
 from parser import CookieRing, PollPacer, poll_delay

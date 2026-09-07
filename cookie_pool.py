@@ -8,8 +8,9 @@ import time
 from pathlib import Path
 
 import requests as std_requests
-import tomllib
 from loguru import logger
+
+from settings import load_config
 
 STORAGE_DIR = Path("storage")
 COOKIES_DIR = STORAGE_DIR / "cookies"
@@ -46,11 +47,6 @@ def log_lifecycle(event: str, cookie_id, **fields) -> None:
     line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} | COOKIE " + " ".join(parts)
     with LIFECYCLE_LOG.open("a", encoding="utf-8") as fh:
         fh.write(line + "\n")
-
-
-def load_config() -> dict:
-    with Path("config.toml").open("rb") as fh:
-        return tomllib.load(fh)["avito"]
 
 
 def pool_size(cfg: dict | None = None) -> int:

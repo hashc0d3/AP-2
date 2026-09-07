@@ -13,12 +13,14 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 from avito_search import snapshot as search_snapshot
+from iphone_filter import iphone_model_allowed
 from region_timezones import region_timezone
 
 import requests as std_requests
-import tomllib
 from curl_cffi import requests as curl_requests
 from loguru import logger
+
+from settings import load_config
 
 STORAGE_DIR = Path("storage")
 COOKIES_PATH = STORAGE_DIR / "cookies.json"
@@ -49,11 +51,6 @@ _MESSAGE_KEYS = (
     "chatAvailable",
 )
 _HIDDEN_PHONE_KEYS = ("isPhoneHidden", "phoneHidden", "isPhoneDisabled")
-
-
-def load_config() -> dict:
-    with Path("config.toml").open("rb") as fh:
-        return tomllib.load(fh)["avito"]
 
 
 def load_seen() -> set[int]:
@@ -815,10 +812,16 @@ def parse_once(cfg: dict, ring: CookieRing, seen: set[int], first: bool) -> tupl
     ordinary = []
     promoted = 0
     skipped_title = 0
+    skipped_iphone_model = 0
     skipped_seller = 0
     too_late = 0
     max_age = int(cfg.get("max_age") or 0)
     notify_max_age = int(cfg.get("notify_max_age") or 0)
+    iphone_min = int(cfg.get("iphone_min_model") or 0)
+    iphone_max = int(cfg.get("iphone_max_model") or 0)
+    allowed_models = cfg.get("iphone_models")
+    if allowed_models is not None and not isinstance(allowed_models, list):
+        allowed_models = None
     must_contain = cfg.get("title_must_contain") or []
     skip = cfg.get("title_skip") or []
     seller_skip = cfg.get("seller_skip") or []
@@ -842,6 +845,14 @@ def parse_once(cfg: dict, ring: CookieRing, seen: set[int], first: bool) -> tupl
         if not title_matches(item, must_contain, skip):
             skipped_title += 1
             continue
+        if (allowed_models is not None or iphone_min) and not iphone_model_allowed(
+            item.get("title") or "",
+            allowed_models,
+            min_gen=iphone_min,
+            max_gen=iphone_max,
+        ):
+            skipped_iphone_model += 1
+            continue
         if notify_max_age and not is_fresh(item, notify_max_age):
             too_late += 1
             continue
@@ -853,6 +864,7 @@ def parse_once(cfg: dict, ring: CookieRing, seen: set[int], first: bool) -> tupl
         f"Свежих: {len(ordinary)}, продвинутых скрыто: {promoted}"
         + (f", продавец скрыт: {skipped_seller}" if skipped_seller else "")
         + (f", не iPhone: {skipped_title}" if skipped_title else "")
+        + (f", модель iPhone: {skipped_iphone_model}" if skipped_iphone_model else "")
         + (f", поздно в выдаче: {too_late}" if too_late else "")
     )
 

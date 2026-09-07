@@ -1,4 +1,4 @@
-import type { Ad, AuthStatus, AvitoPhoneResult, AvitoSession, Category, PriceBatchStatus, Region, SearchMode, SearchState, SpfaBalance } from "./types";
+import type { Ad, AuthStatus, AvitoPhoneResult, AvitoSession, Category, Region, SearchMode, SearchState, SpfaBalance } from "./types";
 
 async function readJson<T>(res: Response): Promise<T> {
   const data = (await res.json()) as T & { error?: string };
@@ -57,16 +57,19 @@ export const api = {
     region?: string;
     category?: string;
     seller_skip?: string[];
+    iphone_models?: number[];
   }): Promise<SearchState> {
     const sellerSkip = payload.seller_skip ?? [];
+    const iphoneModels = payload.iphone_models ?? [];
     const body = payload.mode === "url"
-      ? { mode: "url", url: payload.url || payload.query || "", seller_skip: sellerSkip }
+      ? { mode: "url", url: payload.url || payload.query || "", seller_skip: sellerSkip, iphone_models: iphoneModels }
       : {
         mode: "query",
         query: payload.query || "",
         region: payload.region || "all",
         category: payload.category || "none",
         seller_skip: sellerSkip,
+        iphone_models: iphoneModels,
       };
     return fetchJson<SearchState>("/api/search", {
       method: "POST",
@@ -105,18 +108,8 @@ export const api = {
       body: JSON.stringify({ ad_id: String(adId) }),
     }).then((r) => readJson<AvitoPhoneResult>(r));
   },
-  priceBatchStart(queries: string[], region = "all"): Promise<PriceBatchStatus> {
-    return fetch("/api/price/batch", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ queries, region }),
-    }).then((r) => readJson<PriceBatchStatus>(r));
-  },
-  priceBatchStatus(taskId: string): Promise<PriceBatchStatus> {
-    return fetch(`/api/price/batch?task_id=${encodeURIComponent(taskId)}`).then((r) => readJson<PriceBatchStatus>(r));
-  },
-  spfaBalance(): Promise<SpfaBalance> {
-    return fetch("/api/spfa/balance").then((r) => readJson<SpfaBalance>(r));
+  resourceBalance(): Promise<SpfaBalance> {
+    return fetch("/api/resource/balance").then((r) => readJson<SpfaBalance>(r));
   },
   updateSellerBlacklist(sellers: string[]): Promise<{ sellers: string[] }> {
     return fetch("/api/seller-blacklist", {

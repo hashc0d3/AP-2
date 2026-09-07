@@ -49,7 +49,7 @@
         <div class="user-drawer-panel" id="user-panel-settings" role="tabpanel" aria-labelledby="user-tab-settings">
       <div class="user-drawer-body">
         <p class="user-drawer-section">Баланс</p>
-        <div class="user-menu-row user-menu-balance" id="user-menu-spfa-balance" aria-live="polite">
+        <div class="user-menu-row user-menu-balance" id="user-menu-resource-balance" aria-live="polite">
           <span class="user-menu-row-icon balance" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M12 3v18"></path>
@@ -58,9 +58,9 @@
           </span>
           <span class="user-menu-row-main">
             <span class="user-menu-row-label">Счёт</span>
-            <span class="user-menu-row-hint" id="user-menu-spfa-balance-hint">Сервисный счёт</span>
+            <span class="user-menu-row-hint" id="user-menu-resource-balance-hint">Сервисный счёт</span>
           </span>
-          <span class="user-menu-balance-value" id="user-menu-spfa-balance-value">—</span>
+          <span class="user-menu-balance-value" id="user-menu-resource-balance-value">—</span>
         </div>
 
         <p class="user-drawer-section">Интеграции</p>
@@ -227,6 +227,16 @@
                 <div class="search-settings-block" id="search-settings-cats">
                   <p class="search-settings-title">Категория</p>
                   <div class="cat-row" id="cats"></div>
+                </div>
+                <div class="search-settings-block" id="search-settings-iphone">
+                  <div class="search-settings-title-row">
+                    <p class="search-settings-title">Модели</p>
+                    <div class="iphone-model-actions">
+                      <button type="button" class="iphone-model-action" id="iphone-models-all">Все</button>
+                      <button type="button" class="iphone-model-action" id="iphone-models-none">Снять</button>
+                    </div>
+                  </div>
+                  <div class="iphone-model-groups" id="iphone-models"></div>
                 </div>
                 <div class="search-settings-block hidden" id="search-settings-url">
                   <p class="search-settings-title">Ссылка</p>

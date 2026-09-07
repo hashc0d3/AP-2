@@ -7,14 +7,14 @@ __pycache__
 *.pyo
 *.log
 .env
-.env.*
 storage
 logs
 web/node_modules
 node_modules
 .playwright
-agent-transcripts
-docs
+tests
+tools
 config.toml
 *.md
+!README.md
 !DEPLOY.md

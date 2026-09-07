@@ -1,4 +1,4 @@
-"""Поиск Avito: сбор web URL, регионы и преобразование в API URL через SPFA."""
+"""Поиск Avito: сбор web URL, регионы и преобразование в API URL через сервис ресурса."""
 
 from __future__ import annotations
 
@@ -183,6 +183,7 @@ _state: dict = {
     "error": "",
     "seller_skip": [],
     "search_mode": "query",
+    "iphone_models": None,
 }
 
 
@@ -203,6 +204,7 @@ def snapshot() -> dict:
             "error": _state["error"],
             "seller_skip": list(_state["seller_skip"]),
             "search_mode": _state["search_mode"],
+            "iphone_models": list(_state["iphone_models"]) if _state["iphone_models"] is not None else None,
         }
 
 
@@ -281,20 +283,20 @@ def convert_to_api_url(web_url: str) -> str:
             timeout=40,
         )
     except requests.RequestException as err:
-        raise RuntimeError(f"Не удалось связаться с SPFA: {err}") from err
+        raise RuntimeError(f"Не удалось связаться с ресурсом: {err}") from err
     if response.status_code == 429:
-        raise RuntimeError("Лимит SPFA: подождите минуту и нажмите ещё раз (2 запроса в минуту)")
+        raise RuntimeError("Лимит ресурса: подождите минуту и нажмите ещё раз (2 запроса в минуту)")
     if response.status_code == 400:
-        raise RuntimeError("SPFA не принял ссылку Avito")
+        raise RuntimeError("Сервис не принял ссылку Avito")
     if not response.ok:
-        raise RuntimeError(f"SPFA avito-url {response.status_code}: {response.text[:240]}")
+        raise RuntimeError(f"Сервис avito-url {response.status_code}: {response.text[:240]}")
     try:
         payload = response.json()
     except ValueError as err:
-        raise RuntimeError("SPFA вернул не JSON") from err
+        raise RuntimeError("Сервис вернул не JSON") from err
     api_url = payload.get("api_url") if isinstance(payload, dict) else None
     if not payload.get("success") or not isinstance(api_url, str) or not api_url.startswith("http"):
-        raise RuntimeError(f"SPFA не вернул api_url: {payload}")
+        raise RuntimeError(f"Сервис не вернул api_url: {payload}")
     return api_url
 
 
@@ -315,6 +317,7 @@ def start_search(
     region_slug: str,
     category_id: str = "",
     seller_skip: list | None = None,
+    iphone_models: list | None = None,
     *,
     mode: str = "query",
     web_url: str = "",
@@ -349,6 +352,10 @@ def start_search(
             _state["seller_skip"] = [
                 str(item).strip() for item in seller_skip if str(item).strip()
             ]
+        if iphone_models is not None:
+            from iphone_filter import normalize_allowed_models
+
+            _state["iphone_models"] = normalize_allowed_models(iphone_models)
         generation = _state["generation"]
     _changed.set()
     return snapshot() | {"generation": generation}
@@ -391,8 +398,8 @@ def apply_runtime(cfg: dict, search: dict) -> dict:
     runtime = dict(cfg)
     runtime["url"] = search["web_url"]
     runtime["api_url"] = search["api_url"]
-    runtime["title_must_contain"] = []
-    runtime["title_skip"] = []
+    runtime["title_must_contain"] = list(cfg.get("title_must_contain") or [])
+    runtime["title_skip"] = list(cfg.get("title_skip") or [])
     merged: list[str] = []
     seen: set[str] = set()
     for item in (cfg.get("seller_skip") or []) + (search.get("seller_skip") or []):
@@ -405,4 +412,6 @@ def apply_runtime(cfg: dict, search: dict) -> dict:
         seen.add(key)
         merged.append(text)
     runtime["seller_skip"] = merged
+    if search.get("iphone_models") is not None:
+        runtime["iphone_models"] = list(search["iphone_models"])
     return runtime

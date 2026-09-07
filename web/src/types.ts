@@ -49,7 +49,8 @@ export type SearchState = {
   web_url?: string;
   api_url?: string;
   error?: string;
-  subscription?: AuthStatus;
+  auth?: AuthStatus;
+  iphone_models?: number[] | null;
 };
 
 export type AvitoConnectStatus = {

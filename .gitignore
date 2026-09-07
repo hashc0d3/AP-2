@@ -8,3 +8,15 @@ logs/
 *.log
 node_modules/
 web/node_modules/
+
+# Секреты и локальная конфигурация
+.env
+config.toml
+
+# Сборка фронтенда (генерируется npm run build)
+# static/assets/ — оставляем в репозитории для быстрого запуска без npm
+
+# IDE
+.idea/
+.vscode/
+*.swp
