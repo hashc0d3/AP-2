@@ -2189,6 +2189,23 @@ body.user-drawer-open {
   color: var(--color-muted);
 }
 
+.push-notify-status {
+  margin: -0.25rem 0 0.5rem;
+}
+
+.push-notify-status.is-error {
+  color: #fcd34d;
+}
+
+.push-notify-request {
+  width: 100%;
+  margin: 0 0 0.75rem;
+}
+
+.push-notify-request.hidden {
+  display: none;
+}
+
 .user-menu-avito.on .user-menu-row-hint {
   color: #86efac;
 }

@@ -1,6 +1,6 @@
 import { api } from "./api";
 import { isLightTheme, setLightTheme } from "./theme";
-import { canUsePush, pushBlockReason, pushEnableHint, pushPermission, requestPushPermission, showTestNotification } from "./push-notify";
+import { canUsePush, hasNotificationApi, pushBlockReason, pushEnableHint, pushPermission, pushStatusLine, requestPushPermission, showTestNotification } from "./push-notify";
 import {
   addSellerToBlacklist,
   BLACKLIST_EVENT,
@@ -47,6 +47,8 @@ export function mountUserMenu(opts: UserMenuOptions): {
   const avitoStatus = document.getElementById("user-menu-avito-status") as HTMLElement;
   const avitoBadge = document.getElementById("user-menu-avito-badge") as HTMLElement;
   const pushCheck = document.getElementById("push-notify") as HTMLInputElement;
+  const pushStatus = document.getElementById("push-notify-status") as HTMLElement;
+  const pushRequestBtn = document.getElementById("push-notify-request") as HTMLButtonElement;
   const themeBtn = document.getElementById("theme-toggle") as HTMLButtonElement;
   const themeValue = document.getElementById("theme-toggle-value") as HTMLElement;
   const themePill = document.getElementById("theme-toggle-pill") as HTMLElement;
@@ -118,17 +120,68 @@ export function mountUserMenu(opts: UserMenuOptions): {
     if (!settingsActive) renderBlacklist();
   };
 
-  const syncPushUi = () => {
-    const allowed = canUsePush();
-    pushCheck.disabled = !allowed;
+  const enablePush = async (): Promise<boolean> => {
+    if (!canUsePush()) {
+      showToast(pushEnableHint(pushBlockReason()), "error");
+      return false;
+    }
 
-    if (!allowed) {
+    if (Notification.permission === "granted") {
+      savePush(true);
+      pushCheck.checked = true;
+      showTestNotification();
+      syncPushUi();
+      showToast("Уведомления включены", "success");
+      return true;
+    }
+
+    const granted = await requestPushPermission();
+    if (!granted) {
+      pushCheck.checked = false;
+      savePush(false);
+      syncPushUi();
+      showToast(pushEnableHint(pushBlockReason()), "error");
+      return false;
+    }
+
+    savePush(true);
+    pushCheck.checked = true;
+    syncPushUi();
+    if (showTestNotification()) {
+      showToast("Уведомления включены", "success");
+    } else {
+      showToast("Разрешение получено, но тестовое уведомление не показалось", "info");
+    }
+    return true;
+  };
+
+  const syncPushUi = () => {
+    if (!hasNotificationApi()) {
+      pushCheck.disabled = true;
       pushCheck.checked = false;
       pushEnabled = false;
-      try {
-        localStorage.setItem(PUSH_KEY, "off");
-      } catch {
-        /* empty */
+      pushStatus.textContent = pushStatusLine();
+      pushStatus.classList.add("is-error");
+      pushRequestBtn.classList.add("hidden");
+      return;
+    }
+
+    pushCheck.disabled = false;
+    pushStatus.textContent = pushStatusLine();
+    pushStatus.classList.toggle("is-error", !canUsePush() || Notification.permission === "denied");
+
+    const canRequest = canUsePush() && Notification.permission === "default";
+    pushRequestBtn.classList.toggle("hidden", !canRequest);
+
+    if (!canUsePush()) {
+      pushCheck.checked = false;
+      if (pushEnabled) {
+        pushEnabled = false;
+        try {
+          localStorage.setItem(PUSH_KEY, "off");
+        } catch {
+          /* empty */
+        }
       }
       return;
     }
@@ -139,7 +192,6 @@ export function mountUserMenu(opts: UserMenuOptions): {
       return;
     }
 
-    // Разрешение в браузере сброшено или не выдано — выключаем переключатель.
     if (pushEnabled) {
       pushEnabled = false;
       try {
@@ -227,40 +279,15 @@ export function mountUserMenu(opts: UserMenuOptions): {
   pushCheck.addEventListener("change", async () => {
     if (!pushCheck.checked) {
       savePush(false);
+      syncPushUi();
       return;
     }
+    const ok = await enablePush();
+    if (!ok) pushCheck.checked = false;
+  });
 
-    if (!canUsePush()) {
-      pushCheck.checked = false;
-      savePush(false);
-      showToast(pushEnableHint(pushBlockReason()), "error");
-      return;
-    }
-
-    if (Notification.permission === "granted") {
-      savePush(true);
-      if (showTestNotification()) {
-        showToast("Уведомления включены", "success");
-      } else {
-        showToast("Разрешение есть, но браузер не показал тестовое уведомление", "info");
-      }
-      return;
-    }
-
-    const granted = await requestPushPermission();
-    if (!granted) {
-      pushCheck.checked = false;
-      savePush(false);
-      showToast(pushEnableHint(pushBlockReason()), "error");
-      return;
-    }
-
-    savePush(true);
-    if (showTestNotification()) {
-      showToast("Уведомления включены", "success");
-    } else {
-      showToast("Разрешение получено, но тестовое уведомление не показалось", "info");
-    }
+  pushRequestBtn.addEventListener("click", () => {
+    void enablePush();
   });
 
   themeBtn.addEventListener("click", () => {

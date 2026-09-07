@@ -2,10 +2,22 @@ import type { Ad } from "./types";
 
 export type PushBlockReason = "unsupported" | "insecure" | "denied" | "default";
 
+function isMobileDevice(): boolean {
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
+function isYandexBrowser(): boolean {
+  return /YaBrowser/i.test(navigator.userAgent);
+}
+
 export function canUsePush(): boolean {
   return typeof window !== "undefined"
     && window.isSecureContext
     && "Notification" in window;
+}
+
+export function hasNotificationApi(): boolean {
+  return typeof window !== "undefined" && "Notification" in window;
 }
 
 export function pushPermission(): NotificationPermission | "unsupported" {
@@ -22,18 +34,50 @@ export function pushBlockReason(): PushBlockReason | null {
 }
 
 export function pushEnableHint(reason: PushBlockReason | null = pushBlockReason()): string {
+  const mobile = isMobileDevice();
+  const yandex = isYandexBrowser();
+
   switch (reason) {
     case "unsupported":
       return "Браузер не поддерживает уведомления";
     case "insecure":
+      if (mobile && yandex) {
+        return "На Android в Яндекс.Браузере нужен HTTPS. Откройте сайт как https://ваш-домен (не http://IP:8765) — иначе включить пуши нельзя.";
+      }
       return "Уведомления работают только по HTTPS (или на localhost)";
     case "denied":
-      return "Уведомления заблокированы для этого сайта. Откройте настройки сайта в браузере → Уведомления → Разрешить, затем обновите страницу";
+      if (mobile && yandex) {
+        return "Яндекс.Браузер → ⋮ → Настройки → Настройки сайта → этот сайт → Уведомления → Разрешить. Затем обновите страницу.";
+      }
+      return "Уведомления заблокированы. В настройках сайта в браузере выберите «Разрешить» и обновите страницу";
     case "default":
+      if (mobile) {
+        return "Нажмите «Разрешить» ниже — должно появиться системное окно браузера";
+      }
       return "Разрешите уведомления во всплывающем окне браузера";
     default:
       return "Не удалось включить уведомления";
   }
+}
+
+/** Короткий статус для блока в меню пользователя. */
+export function pushStatusLine(): string {
+  if (!hasNotificationApi()) return "Браузер не поддерживает уведомления";
+  if (!window.isSecureContext) {
+    const proto = location.protocol;
+    return proto === "http:"
+      ? `Сейчас ${location.host} по HTTP — нужен HTTPS`
+      : "Нужно защищённое соединение (HTTPS)";
+  }
+  if (Notification.permission === "granted") {
+    return isMobileDevice()
+      ? "Включено. Уведомления приходят, пока вкладка открыта"
+      : "Включено";
+  }
+  if (Notification.permission === "denied") {
+    return "Заблокировано в настройках браузера";
+  }
+  return "Нажмите переключатель или «Разрешить»";
 }
 
 export async function requestPushPermission(): Promise<boolean> {
