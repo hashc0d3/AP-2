@@ -1,6 +1,6 @@
 import { api } from "./api";
 import { isLightTheme, setLightTheme } from "./theme";
-import { canUsePush, requestPushPermission } from "./push-notify";
+import { canUsePush, pushBlockReason, pushEnableHint, pushPermission, requestPushPermission, showTestNotification } from "./push-notify";
 import {
   addSellerToBlacklist,
   BLACKLIST_EVENT,
@@ -118,18 +118,46 @@ export function mountUserMenu(opts: UserMenuOptions): {
     if (!settingsActive) renderBlacklist();
   };
 
+  const syncPushUi = () => {
+    const allowed = canUsePush();
+    pushCheck.disabled = !allowed;
+
+    if (!allowed) {
+      pushCheck.checked = false;
+      pushEnabled = false;
+      try {
+        localStorage.setItem(PUSH_KEY, "off");
+      } catch {
+        /* empty */
+      }
+      return;
+    }
+
+    const permission = pushPermission();
+    if (permission === "granted") {
+      pushCheck.checked = pushEnabled;
+      return;
+    }
+
+    // Разрешение в браузере сброшено или не выдано — выключаем переключатель.
+    if (pushEnabled) {
+      pushEnabled = false;
+      try {
+        localStorage.setItem(PUSH_KEY, "off");
+      } catch {
+        /* empty */
+      }
+    }
+    pushCheck.checked = false;
+  };
+
   const loadPush = () => {
     try {
       pushEnabled = localStorage.getItem(PUSH_KEY) === "on";
     } catch {
       pushEnabled = false;
     }
-    pushCheck.checked = pushEnabled;
-    if (!canUsePush()) {
-      pushCheck.disabled = true;
-      pushCheck.checked = false;
-      pushEnabled = false;
-    }
+    syncPushUi();
   };
 
   const savePush = (on: boolean) => {
@@ -149,6 +177,7 @@ export function mountUserMenu(opts: UserMenuOptions): {
     document.body.classList.toggle("user-drawer-open", open);
     if (open) {
       setDrawerTab(activeTab);
+      syncPushUi();
       if (activeTab === "settings") void refreshBalance();
     }
   };
@@ -195,24 +224,43 @@ export function mountUserMenu(opts: UserMenuOptions): {
     opts.onAvitoClick();
   });
 
-  pushCheck.addEventListener("change", () => {
+  pushCheck.addEventListener("change", async () => {
     if (!pushCheck.checked) {
       savePush(false);
       return;
     }
-    void requestPushPermission().then((granted) => {
-      if (!granted) {
-        pushCheck.checked = false;
-        savePush(false);
-        showToast(
-          canUsePush() ? "Разрешите уведомления в браузере" : "Уведомления недоступны",
-          "error",
-        );
-        return;
-      }
+
+    if (!canUsePush()) {
+      pushCheck.checked = false;
+      savePush(false);
+      showToast(pushEnableHint(pushBlockReason()), "error");
+      return;
+    }
+
+    if (Notification.permission === "granted") {
       savePush(true);
+      if (showTestNotification()) {
+        showToast("Уведомления включены", "success");
+      } else {
+        showToast("Разрешение есть, но браузер не показал тестовое уведомление", "info");
+      }
+      return;
+    }
+
+    const granted = await requestPushPermission();
+    if (!granted) {
+      pushCheck.checked = false;
+      savePush(false);
+      showToast(pushEnableHint(pushBlockReason()), "error");
+      return;
+    }
+
+    savePush(true);
+    if (showTestNotification()) {
       showToast("Уведомления включены", "success");
-    });
+    } else {
+      showToast("Разрешение получено, но тестовое уведомление не показалось", "info");
+    }
   });
 
   themeBtn.addEventListener("click", () => {

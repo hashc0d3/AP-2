@@ -942,7 +942,7 @@ export function mountMonitor(opts: {
     setInterval(() => {
       if (monitoring) void api.ads().then((ads) => addBatch(ads, false)).catch(() => undefined);
     }, 4000);
-    setInterval(refreshCardTimes, 30_000);
+    setInterval(refreshCardTimes, 1000);
     try {
       const data = await api.status();
       if (data.running) {
