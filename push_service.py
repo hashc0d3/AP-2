@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import threading
@@ -10,24 +11,77 @@ from pathlib import Path
 from loguru import logger
 
 SUBS_PATH = Path("storage") / "push_subscriptions.json"
+VAPID_PRIVATE_PATH = Path("storage") / "vapid_private.pem"
+VAPID_PUBLIC_PATH = Path("storage") / "vapid_public.key"
 _lock = threading.RLock()
 
 
-def _vapid_keys() -> tuple[str, str] | None:
-    pub = os.environ.get("VAPID_PUBLIC_KEY", "").strip()
-    priv = os.environ.get("VAPID_PRIVATE_KEY", "").strip().replace("\\n", "\n")
-    if pub and priv:
-        return pub, priv
-    return None
+def _normalize_pem(raw: str) -> str:
+    text = raw.strip().strip('"').strip("'")
+    text = text.replace("\\n", "\n")
+    if "BEGIN PRIVATE KEY" not in text:
+        return text
+    if not text.endswith("\n"):
+        text += "\n"
+    return text
+
+
+def _load_vapid() -> object | None:
+    try:
+        from py_vapid import Vapid02
+    except ImportError:
+        logger.warning("py-vapid не установлен")
+        return None
+
+    pem = ""
+    if VAPID_PRIVATE_PATH.is_file():
+        pem = VAPID_PRIVATE_PATH.read_text(encoding="utf-8")
+    elif os.environ.get("VAPID_PRIVATE_KEY", "").strip():
+        pem = os.environ.get("VAPID_PRIVATE_KEY", "")
+
+    pem = _normalize_pem(pem)
+    if not pem or "BEGIN PRIVATE KEY" not in pem:
+        return None
+
+    try:
+        vapid = Vapid02()
+        vapid.from_pem(pem.encode("utf-8"))
+        return vapid
+    except Exception as err:
+        logger.warning(f"VAPID private key invalid: {err}")
+        return None
+
+
+def _public_key_b64u(vapid: object) -> str | None:
+    from cryptography.hazmat.primitives import serialization
+
+    pub_raw = vapid.public_key.public_bytes(
+        encoding=serialization.Encoding.X962,
+        format=serialization.PublicFormat.UncompressedPoint,
+    )
+    return base64.urlsafe_b64encode(pub_raw).decode("ascii").rstrip("=")
 
 
 def vapid_public_key() -> str | None:
-    keys = _vapid_keys()
-    return keys[0] if keys else None
+    env_pub = os.environ.get("VAPID_PUBLIC_KEY", "").strip()
+    if env_pub:
+        return env_pub
+    if VAPID_PUBLIC_PATH.is_file():
+        stored = VAPID_PUBLIC_PATH.read_text(encoding="utf-8").strip()
+        if stored:
+            return stored
+    vapid = _load_vapid()
+    if not vapid:
+        return None
+    try:
+        return _public_key_b64u(vapid)
+    except Exception as err:
+        logger.warning(f"VAPID public key error: {err}")
+        return None
 
 
 def is_configured() -> bool:
-    return vapid_public_key() is not None
+    return _load_vapid() is not None and bool(vapid_public_key())
 
 
 def _vapid_claims() -> dict[str, str]:
@@ -96,8 +150,9 @@ def _format_payload(ads: list[dict]) -> str:
 
 
 def _send_all(payload: str) -> None:
-    keys = _vapid_keys()
-    if not keys:
+    vapid = _load_vapid()
+    if not vapid:
+        logger.warning("Push: VAPID не настроен — уведомление не отправлено")
         return
 
     try:
@@ -106,7 +161,6 @@ def _send_all(payload: str) -> None:
         logger.warning("pywebpush не установлен — push не отправлен")
         return
 
-    _, private_key = keys
     with _lock:
         subs = list(_load())
     if not subs:
@@ -120,7 +174,7 @@ def _send_all(payload: str) -> None:
             webpush(
                 subscription_info=sub,
                 data=payload,
-                vapid_private_key=private_key,
+                vapid_private_key=vapid,
                 vapid_claims=_vapid_claims(),
             )
             sent += 1

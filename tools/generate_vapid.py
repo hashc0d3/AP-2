@@ -5,8 +5,13 @@ from __future__ import annotations
 
 import base64
 import sys
+from pathlib import Path
 
 from cryptography.hazmat.primitives import serialization
+
+STORAGE = Path("storage")
+PRIVATE_PATH = STORAGE / "vapid_private.pem"
+PUBLIC_PATH = STORAGE / "vapid_public.key"
 
 
 def main() -> int:
@@ -24,12 +29,21 @@ def main() -> int:
         format=serialization.PublicFormat.UncompressedPoint,
     )
     public = base64.urlsafe_b64encode(pub_raw).decode("ascii").rstrip("=")
-    private = vapid.private_pem().decode("utf-8").replace("\n", "\\n")
+    private_pem = vapid.private_pem().decode("utf-8")
 
-    print("Добавьте в .env:\n")
+    STORAGE.mkdir(parents=True, exist_ok=True)
+    PRIVATE_PATH.write_text(private_pem, encoding="utf-8")
+    PUBLIC_PATH.write_text(public, encoding="utf-8")
+
+    print("Сохранено:")
+    print(f"  {PRIVATE_PATH}")
+    print(f"  {PUBLIC_PATH}")
+    print()
+    print("В .env достаточно (приватный ключ — в файле storage/vapid_private.pem):")
     print(f"VAPID_PUBLIC_KEY={public}")
-    print(f"VAPID_PRIVATE_KEY={private}")
     print("VAPID_CONTACT=mailto:admin@peterparser.ru")
+    print()
+    print("Удалите VAPID_PRIVATE_KEY из .env, если был — он ломается при \\n в docker.")
     return 0
 
 
