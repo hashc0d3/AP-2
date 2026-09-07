@@ -3,7 +3,7 @@ import { itemWebUrl } from "./avito-links";
 import { ICON_CLOSE, ICON_EXT, ICON_PHONE, ICON_STAR, ICON_STAR_OUTLINE } from "./card-icons";
 import { isFavorite, toggleFavorite } from "./favorites";
 import { notifyNewAds } from "./push-notify";
-import { displayPrice, escapeHtml, formatAddedAt, imgSrc } from "./format";
+import { collapseDescText, displayPrice, escapeHtml, formatAddedAt, imgSrc } from "./format";
 import { openImageLightbox } from "./image-lightbox";
 import { regionTimezone } from "./region-timezones";
 import {
@@ -522,7 +522,7 @@ export function mountMonitor(opts: {
       : "";
     const description = (ad.description || "").trim();
     const descriptionHtml = description
-      ? `<div class="card-desc" data-action="toggle-desc" role="button" tabindex="0" aria-expanded="false">${escapeHtml(description)}</div>`
+      ? `<div class="card-desc" data-action="toggle-desc" role="button" tabindex="0" aria-expanded="false"><span class="card-desc-text">${escapeHtml(collapseDescText(description))}</span></div>`
       : "";
     const mediaHtml = hideImages
       ? ""
@@ -586,9 +586,12 @@ export function mountMonitor(opts: {
     });
 
     const descBtn = card.querySelector('[data-action="toggle-desc"]') as HTMLElement | null;
-    if (descBtn) {
+    const descText = descBtn?.querySelector(".card-desc-text") as HTMLElement | null;
+    const fullDesc = (ad.description || "").trim();
+    if (descBtn && descText && fullDesc) {
       const toggleDesc = () => {
         const open = descBtn.classList.toggle("open");
+        descText.textContent = open ? fullDesc : collapseDescText(fullDesc);
         descBtn.setAttribute("aria-expanded", open ? "true" : "false");
       };
       descBtn.addEventListener("click", (ev) => {

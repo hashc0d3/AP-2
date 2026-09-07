@@ -8,6 +8,11 @@ export function escapeHtml(text: string): string {
   }[ch] || ch));
 }
 
+/** Одна строка для свёрнутого описания (Safari/iOS не режет текст с переносами). */
+export function collapseDescText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
 export function displayPrice(price: string): string {
   return price.replace(/[\u00a0\u202f\u2009]/g, " ").trim();
 }

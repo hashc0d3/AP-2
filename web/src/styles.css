@@ -1975,34 +1975,37 @@ button.card-media:hover img {
 
 .card-desc {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   margin: 0.375rem 0 0;
   padding: 0;
   border: 0;
   background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.card-desc-text {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: inherit;
   font-size: 0.8125rem;
   line-height: 1.45;
   color: var(--color-muted);
-  text-align: left;
-  cursor: pointer;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
-  line-clamp: 1;
-  overflow: hidden;
-  word-break: break-word;
 }
 
-.card-desc:hover {
+.card-desc:hover .card-desc-text {
   color: var(--color-body);
 }
 
-.card-desc.open {
-  display: block;
-  -webkit-line-clamp: unset;
-  line-clamp: unset;
+.card-desc.open .card-desc-text {
   overflow: visible;
+  text-overflow: clip;
   white-space: pre-line;
+  word-break: break-word;
 }
 
 .card-btn.price {
