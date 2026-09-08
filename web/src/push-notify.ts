@@ -8,7 +8,7 @@ function isMobileDevice(): boolean {
   return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 }
 
-function isIosDevice(): boolean {
+export function isIosDevice(): boolean {
   return /iPhone|iPad|iPod/i.test(navigator.userAgent);
 }
 
