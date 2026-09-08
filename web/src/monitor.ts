@@ -2,7 +2,7 @@ import { api } from "./api";
 import { itemWebUrl } from "./avito-links";
 import { ICON_CLOSE, ICON_EXT, ICON_PHONE, ICON_STAR, ICON_STAR_OUTLINE } from "./card-icons";
 import { isFavorite, toggleFavorite } from "./favorites";
-import { notifyNewAds } from "./push-notify";
+import { notifyNewAds, isIosDevice } from "./push-notify";
 import { collapseDescText, displayPrice, escapeHtml, formatAddedAt, imgSrc } from "./format";
 import { openImageLightbox } from "./image-lightbox";
 import { regionTimezone } from "./region-timezones";
@@ -346,6 +346,17 @@ export function mountMonitor(opts: {
   const openAvitoModal = () => {
     avitoModal.classList.remove("hidden");
     avitoHint.textContent = "";
+    const subtitle = $("avito-modal-subtitle");
+    const androidSteps = $("avito-setup-android");
+    const iosSteps = $("avito-setup-ios");
+    const ios = isIosDevice();
+    if (subtitle) {
+      subtitle.textContent = ios
+        ? "На iPhone cookies Avito нужно экспортировать из Safari — PWA их не видит сам."
+        : "Подключение через Kiwi Browser для кнопки «Позвонить».";
+    }
+    androidSteps?.classList.toggle("hidden", ios);
+    iosSteps?.classList.toggle("hidden", !ios);
     void refreshAvitoSession();
   };
 

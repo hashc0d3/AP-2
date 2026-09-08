@@ -180,7 +180,7 @@
     <div class="panel relative max-w-lg">
       <button class="absolute top-4 right-4 grid size-8 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-xl leading-none text-muted hover:bg-raised hover:text-body" id="avito-close" type="button" aria-label="Закрыть">×</button>
       <h2 class="text-xl font-semibold">Аккаунт Avito</h2>
-      <p class="mt-1.5 hint" id="avito-modal-subtitle">Подключение через Kiwi Browser для кнопки «Позвонить».</p>
+      <p class="mt-1.5 hint" id="avito-modal-subtitle">Подключение аккаунта Avito для кнопки «Позвонить».</p>
       <p class="mt-3 text-sm" id="avito-status-line">Не подключён</p>
 
       <div id="avito-connected-box" class="mt-5 hidden space-y-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
@@ -189,13 +189,20 @@
       </div>
 
       <div class="mt-5 space-y-4" id="avito-setup-box">
-        <ol class="hint list-decimal space-y-2 pl-4 text-xs">
+        <ol class="hint list-decimal space-y-2 pl-4 text-xs" id="avito-setup-android">
           <li>Установите браузер <a href="https://play.google.com/store/apps/details?id=com.kiwibrowser.browser" target="_blank" rel="noopener">Kiwi Browser</a> (Android)</li>
           <li>В Kiwi установите расширение <a href="https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm" target="_blank" rel="noopener">Cookie-Editor</a></li>
           <li>Откройте <strong>этот сайт парсера</strong> в Kiwi (не в Chrome)</li>
           <li>Войдите на <code>m.avito.ru</code> в Kiwi</li>
           <li>Cookie-Editor → Export → JSON</li>
           <li>Вернитесь на парсер и вставьте JSON ниже</li>
+        </ol>
+        <ol class="hint list-decimal space-y-2 pl-4 text-xs hidden" id="avito-setup-ios">
+          <li>В <strong>Safari</strong> (не в иконке PWA) откройте <code>m.avito.ru</code> и войдите в аккаунт</li>
+          <li>Экспортируйте cookies расширением Cookie-Editor для Safari или с компьютера (Chrome → Export)</li>
+          <li>Нужны cookies <code>sessid</code> и <code>auth</code> — без них вход не сохранится</li>
+          <li>Откройте <strong>PWA «Сигнал»</strong> и вставьте JSON ниже → «Сохранить cookies»</li>
+          <li>PWA и Safari не делят cookies Avito — вставка JSON обязательна</li>
         </ol>
         <button class="btn-primary w-full" id="avito-open-login" type="button">Открыть m.avito.ru</button>
         <textarea id="avito-cookies" class="field min-h-32 font-mono text-xs" placeholder='[{"name":"sessid","value":"..."}]'></textarea>

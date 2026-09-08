@@ -96,11 +96,18 @@ export const api = {
   },
   importAvitoSession(raw: string): Promise<AvitoSession> {
     const trimmed = raw.trim();
-    const body = trimmed.startsWith("[") ? trimmed : JSON.stringify({ cookies: JSON.parse(trimmed) });
+    const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+    let payload: Record<string, unknown>;
+    if (trimmed.startsWith("[")) {
+      payload = { cookies: JSON.parse(trimmed), user_agent: ua };
+    } else {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      payload = { ...parsed, user_agent: parsed.user_agent || ua };
+    }
     return fetch("/api/avito/session/import", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body,
+      body: JSON.stringify(payload),
     }).then((r) => readJson<AvitoSession>(r));
   },
   clearAvitoSession(): Promise<AvitoSession> {

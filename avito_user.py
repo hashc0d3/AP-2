@@ -82,15 +82,39 @@ def load_user_session() -> dict | None:
     return data
 
 
+def _infer_impersonate(user_agent: str) -> str | None:
+    ua = (user_agent or "").lower()
+    if "iphone" in ua or "ipad" in ua or "ipod" in ua:
+        if "version/18" in ua:
+            return "safari18_0_ios"
+        return "safari17_2_ios"
+    if "android" in ua and "chrome" in ua:
+        return "chrome131_android"
+    if "safari" in ua and "chrome" not in ua and "chromium" not in ua:
+        return "safari17_0"
+    if "chrome" in ua:
+        return "chrome131"
+    return None
+
+
 def save_user_session(session: dict) -> dict:
     session = normalize_import(session)
     cookies = session.get("cookies") or {}
     if not isinstance(cookies, dict) or not cookies:
         raise ValueError("Пустые cookies")
+    if not is_logged_in(cookies):
+        raise ValueError(
+            "Нет cookies входа (sessid/auth). Экспортируйте все cookies с m.avito.ru, не только u."
+        )
+    user_agent = str(session.get("user_agent") or "").strip()
+    fingerprint = dict(session.get("fingerprint") or {})
+    impersonate = fingerprint.get("impersonate") or _infer_impersonate(user_agent)
+    if impersonate:
+        fingerprint["impersonate"] = impersonate
     payload = {
         "cookies": cookies,
-        "user_agent": session.get("user_agent") or "",
-        "fingerprint": session.get("fingerprint") or {},
+        "user_agent": user_agent,
+        "fingerprint": fingerprint,
         "saved_at": time.time(),
         "label": session.get("label") or _session_label(cookies),
     }
