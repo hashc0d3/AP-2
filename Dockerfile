@@ -20,13 +20,13 @@ RUN apt-get update \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY *.py ./
-COPY tools/generate_vapid.py ./tools/generate_vapid.py
+COPY avito_monitor/ ./avito_monitor/
 COPY --from=web /app/static ./static/
 
 RUN mkdir -p storage/cookies logs
 
 ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
     WEB_HOST=0.0.0.0 \
     WEB_OPEN_BROWSER=0 \
     SKIP_VPN_BYPASS=1
@@ -40,4 +40,4 @@ COPY docker/entrypoint.sh /entrypoint.sh
 RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["python", "parser.py"]
+CMD ["python", "-m", "avito_monitor"]

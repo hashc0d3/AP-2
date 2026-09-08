@@ -42,7 +42,7 @@ const OVERRIDES: Record<string, string> = {
   abakan: "Asia/Krasnoyarsk",
   "gorno-altaysk": "Asia/Barnaul",
   norilsk: "Asia/Krasnoyarsk",
-  rubtovsk: "Asia/Barnaul",
+  rubtsovsk: "Asia/Barnaul",
   irkutsk: "Asia/Irkutsk",
   angarsk: "Asia/Irkutsk",
   bratsk: "Asia/Irkutsk",

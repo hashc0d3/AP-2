@@ -1,0 +1,47 @@
+[
+  {
+    "id": "apple_phones",
+    "name": "Смартфоны Apple",
+    "path": "telefony/mobilnye_telefony/apple-ASgBAgICAkS0wA3OqzmwwQ2I_Dc",
+    "extra": [],
+    "api_category_id": "84",
+    "api_params": {
+      "110618": "469735",
+      "110680": "458500"
+    }
+  },
+  {
+    "id": "game_consoles",
+    "name": "Игровые приставки",
+    "path": "igry_pristavki_i_programmy/igry_pristavki_i_programmy/igrovye_pristavki/igrovye_pristavki-ASgBAgICAkSSAsoJ9M0UmsqPAw",
+    "extra": [],
+    "api_category_id": "97",
+    "api_params": {
+      "137": "613",
+      "168826": "3273357"
+    }
+  },
+  {
+    "id": "laptops_apple",
+    "name": "Ноутбуки Apple",
+    "path": "noutbuki/apple-ASgBAgICAUSo5A302WY",
+    "extra": [],
+    "api_category_id": "98",
+    "api_params": {
+      "112916": "841338"
+    }
+  },
+  {
+    "id": "tablets",
+    "name": "Планшеты Apple",
+    "path": "planshety_i_elektronnye_knigi/planshety-ASgBAgICAUSYAoZO",
+    "extra": [
+      "f=ASgBAgICAkSYAoZOwPgO~qagDw"
+    ],
+    "api_category_id": "96",
+    "api_params": {
+      "122400": "15993277",
+      "140": "4995"
+    }
+  }
+]

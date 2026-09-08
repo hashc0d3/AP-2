@@ -67,9 +67,13 @@ def _load_signing_vapid():
 def _public_key_b64u_from_pem(pem: str) -> str:
     from cryptography.hazmat.primitives import serialization
 
-    pub_raw = _load_private_key(pem).public_key().public_bytes(
-        encoding=serialization.Encoding.X962,
-        format=serialization.PublicFormat.UncompressedPoint,
+    pub_raw = (
+        _load_private_key(pem)
+        .public_key()
+        .public_bytes(
+            encoding=serialization.Encoding.X962,
+            format=serialization.PublicFormat.UncompressedPoint,
+        )
     )
     return base64.urlsafe_b64encode(pub_raw).decode("ascii").rstrip("=")
 

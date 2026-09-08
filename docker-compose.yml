@@ -1,19 +1,24 @@
 services:
-  parser:
+  monitor:
     build: .
-    image: parser1:latest
-    container_name: parser1
+    image: avito-monitor:latest
+    container_name: avito-monitor
     restart: unless-stopped
     env_file:
       - .env
+    # Наружу порт не публикуем: TLS и домен обеспечивает nginx на хосте,
+    # он проксирует на 127.0.0.1 (см. DEPLOY.md).
     ports:
       - "127.0.0.1:${WEB_PORT:-8765}:8765"
     environment:
+      # Внутри контейнера слушаем все адреса — иначе проброс порта не работает.
       WEB_HOST: "0.0.0.0"
       WEB_OPEN_BROWSER: "0"
       SKIP_VPN_BYPASS: "1"
     volumes:
+      # Настройки правятся на хосте, перезапуск подхватывает изменения.
       - ./config.toml:/app/config.toml:ro
+      # Cookies, лента и ключи push должны переживать пересборку образа.
       - parser-storage:/app/storage
       - parser-logs:/app/logs
     healthcheck:
@@ -22,7 +27,14 @@ services:
       timeout: 5s
       retries: 3
       start_period: 25s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
 volumes:
+  # Имена оставлены прежними: переименование создало бы пустые тома, а
+  # вместе с ними потерялись бы купленные cookies и ключи push-уведомлений.
   parser-storage:
   parser-logs:

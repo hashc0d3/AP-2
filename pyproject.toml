@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "avito-monitor"
+version = "1.0.0"
+description = "Сигнал — мониторинг новых объявлений Avito в реальном времени"
+requires-python = ">=3.11"
+dynamic = ["dependencies"]
+
+[project.scripts]
+avito-monitor = "avito_monitor.__main__:main"
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.packages.find]
+include = ["avito_monitor*"]
+
+[tool.setuptools.package-data]
+# Справочники регионов, категорий и моделей — часть кода: без них парсер
+# не соберёт ни одной ссылки.
+avito_monitor = ["data/*.json"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["static", "web"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes: неиспользуемые имена, опечатки в переменных
+    "I",    # isort: порядок импортов
+    "B",    # flake8-bugbear: типичные логические ошибки
+    "C4",   # comprehensions
+    "UP",   # pyupgrade: устаревшие конструкции
+    "SIM",  # упрощаемые конструкции
+    "RUF",  # правила самого ruff
+]
+ignore = [
+    "E501",    # длину строк держит форматтер
+    "RUF001",  # кириллица в строках — это язык интерфейса, не опечатка
+    "RUF002",
+    "RUF003",
+    "B008",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Тестам можно обращаться к внутренним именам модулей.
+"tests/*" = ["SLF001"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q --strict-markers"
+filterwarnings = [
+    "ignore::DeprecationWarning:loguru.*",
+]

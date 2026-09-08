@@ -6,16 +6,20 @@ __pycache__
 *.pyc
 *.pyo
 *.log
+
+# Секреты и рабочие данные монтируются, а не копируются в образ.
 .env
+config.toml
 storage
 logs
-web/node_modules
+
+# Сборка фронтенда идёт внутри образа из web/src.
 node_modules
-.playwright
+web/node_modules
+static
+
 tests
-tools/*
-!tools/generate_vapid.py
-config.toml
+docs
 *.md
-!README.md
-!DEPLOY.md
+.ruff_cache
+.pytest_cache

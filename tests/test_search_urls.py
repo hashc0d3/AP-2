@@ -1,0 +1,136 @@
+"""Сборка ссылок Avito: веб-поиск, JSON API и фильтр моделей iPhone."""
+
+from __future__ import annotations
+
+import pytest
+
+from avito_monitor.avito import catalog, iphone, iphone_params
+from avito_monitor.avito.search import plan_search
+
+
+def _web_url_with_models(models: list[str] | None, region: str = "moskva") -> str:
+    return plan_search("", region, catalog.IPHONE_CATEGORY_ID, models).web_url
+
+
+# ── Веб-ссылки ─────────────────────────────────────────────────────────────
+
+
+def test_web_url_uses_region_and_category_path() -> None:
+    url = catalog.build_web_url("", "kazan", "game_consoles")
+    assert url.startswith("https://www.avito.ru/kazan/")
+    assert "igrovye_pristavki/igrovye_pristavki-ASgBAgICAkSSAsoJ9M0UmsqPAw" in url
+    assert "localPriority=0" in url
+    assert "s=104" in url
+    assert "owner[]=private" in url
+
+
+def test_moscow_uses_wider_avito_slug() -> None:
+    """В путях Avito Москва идёт вместе с областью."""
+    assert "https://www.avito.ru/moskva_i_mo/" in catalog.build_web_url("", "moskva", "tablets")
+
+
+def test_web_url_keeps_category_extra_params() -> None:
+    url = catalog.build_web_url("", "moskva", "tablets")
+    assert "planshety-ASgBAgICAUSYAoZO" in url
+    assert "f=ASgBAgICAkSYAoZOwPgO~qagDw" in url
+
+
+def test_web_url_encodes_query() -> None:
+    url = catalog.build_web_url("iphone 13 про", "all", catalog.IPHONE_CATEGORY_ID)
+    assert "q=iphone%2013%20" in url
+
+
+def test_unknown_category_is_rejected() -> None:
+    with pytest.raises(ValueError, match="Неизвестная категория"):
+        catalog.find_category("нет такой")
+
+
+# ── Локальная сборка API URL ───────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("region", "category", "expected"),
+    [
+        ("all", "apple_phones", ["categoryId=84", "locationId=621540"]),
+        ("moskva", "game_consoles", ["categoryId=97", "locationId=107620", "params%5B137%5D=613"]),
+        ("moskva", "laptops_apple", ["categoryId=98", "params%5B112916%5D=841338"]),
+        ("all", "tablets", ["categoryId=96", "params%5B140%5D=4995"]),
+    ],
+)
+def test_api_url_built_locally(region: str, category: str, expected: list[str]) -> None:
+    url = catalog.build_api_url(region, category)
+    assert url is not None
+    for fragment in [*expected, "sort=date", "privateOnly=1"]:
+        assert fragment in url
+
+
+def test_api_url_unknown_region_needs_service() -> None:
+    """Для незнакомого региона locationId неизвестен — нужен внешний сервис."""
+    assert catalog.build_api_url("нет-такого-региона", "apple_phones") is None
+
+
+def test_with_page_replaces_existing_page() -> None:
+    url = catalog.build_api_url("all", "apple_phones")
+    assert url is not None
+    second = catalog.with_page(url, 2)
+    assert "page=2" in second
+    assert catalog.with_page(second, 3).count("page=") == 1
+
+
+# ── Фильтр моделей ─────────────────────────────────────────────────────────
+
+
+def test_selected_models_land_in_web_url() -> None:
+    url = _web_url_with_models(["13-pro", "13-pro-max"])
+    assert "1642359" in url
+    assert "1642361" in url
+    assert str(iphone_params.TYPE_VALUE) in url
+    assert iphone_params.has_model_params(url) is True
+
+
+def test_all_models_selected_means_no_filter() -> None:
+    """Все модели — та же выдача, но без лишних параметров в ссылке."""
+    every_id = [model.id for model in iphone.all_models()]
+    url = _web_url_with_models(every_id)
+    assert f"params[{iphone_params.MODEL_PARAM_WEB}]" not in url
+    assert iphone_params.has_model_params(url) is False
+
+
+def test_model_values_follow_selection_order() -> None:
+    assert iphone_params.models_to_avito_values(["13-pro", "13-pro-max"]) == [1642359, 1642361]
+    assert iphone_params.models_to_avito_values(["13-pro-max", "13-pro"]) == [1642361, 1642359]
+
+
+def test_api_url_uses_its_own_param_code() -> None:
+    """У JSON API код параметра «модель» отличается от веб-поиска."""
+    api = (
+        "https://www.avito.ru/web/1/js/items?categoryId=84&locationId=637640"
+        "&owner%5B0%5D=private&sort=date"
+    )
+    updated, applied = iphone_params.append_model_params(api, ["13-pro"])
+    assert applied is True
+    assert f"params%5B{iphone_params.MODEL_PARAM_API}%5D%5B0%5D=1642359" in updated
+    assert iphone_params.has_model_params(updated) is True
+
+
+def test_append_is_idempotent() -> None:
+    """Повторное применение не должно накапливать параметры."""
+    once, _ = iphone_params.append_model_params(
+        catalog.build_web_url("", "moskva", catalog.IPHONE_CATEGORY_ID), ["13-pro"]
+    )
+    twice, _ = iphone_params.append_model_params(once, ["13-pro"])
+    assert once == twice
+
+
+def test_strip_removes_model_filter() -> None:
+    url = _web_url_with_models(["13-pro"])
+    stripped = iphone_params.strip_model_params(url)
+    assert "1642359" not in stripped
+    assert iphone_params.has_model_params(stripped) is False
+
+
+def test_models_ignored_for_other_categories() -> None:
+    """Фильтр моделей осмыслен только для смартфонов Apple."""
+    plan = plan_search("", "moskva", "tablets", ["13-pro"])
+    assert plan.iphone_models is None
+    assert iphone_params.has_model_params(plan.web_url) is False

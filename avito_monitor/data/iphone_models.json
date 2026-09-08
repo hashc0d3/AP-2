@@ -1,0 +1,170 @@
+[
+  {
+    "id": "11",
+    "gen": 11,
+    "label": "iPhone 11",
+    "avito_value": 468690
+  },
+  {
+    "id": "11-pro",
+    "gen": 11,
+    "label": "iPhone 11 Pro",
+    "avito_value": 461016
+  },
+  {
+    "id": "11-pro-max",
+    "gen": 11,
+    "label": "iPhone 11 Pro Max",
+    "avito_value": 468037
+  },
+  {
+    "id": "12",
+    "gen": 12,
+    "label": "iPhone 12",
+    "avito_value": 491645
+  },
+  {
+    "id": "12-mini",
+    "gen": 12,
+    "label": "iPhone 12 mini",
+    "avito_value": 491622
+  },
+  {
+    "id": "12-pro",
+    "gen": 12,
+    "label": "iPhone 12 Pro",
+    "avito_value": 491594
+  },
+  {
+    "id": "12-pro-max",
+    "gen": 12,
+    "label": "iPhone 12 Pro Max",
+    "avito_value": 491590
+  },
+  {
+    "id": "13",
+    "gen": 13,
+    "label": "iPhone 13",
+    "avito_value": 1642358
+  },
+  {
+    "id": "13-mini",
+    "gen": 13,
+    "label": "iPhone 13 mini",
+    "avito_value": 1642360
+  },
+  {
+    "id": "13-pro",
+    "gen": 13,
+    "label": "iPhone 13 Pro",
+    "avito_value": 1642359
+  },
+  {
+    "id": "13-pro-max",
+    "gen": 13,
+    "label": "iPhone 13 Pro Max",
+    "avito_value": 1642361
+  },
+  {
+    "id": "14",
+    "gen": 14,
+    "label": "iPhone 14",
+    "avito_value": 17605542
+  },
+  {
+    "id": "14-plus",
+    "gen": 14,
+    "label": "iPhone 14 Plus",
+    "avito_value": 17605549
+  },
+  {
+    "id": "14-pro",
+    "gen": 14,
+    "label": "iPhone 14 Pro",
+    "avito_value": 17605543
+  },
+  {
+    "id": "14-pro-max",
+    "gen": 14,
+    "label": "iPhone 14 Pro Max",
+    "avito_value": 17605548
+  },
+  {
+    "id": "15",
+    "gen": 15,
+    "label": "iPhone 15",
+    "avito_value": 18720777
+  },
+  {
+    "id": "15-plus",
+    "gen": 15,
+    "label": "iPhone 15 Plus",
+    "avito_value": 18720870
+  },
+  {
+    "id": "15-pro",
+    "gen": 15,
+    "label": "iPhone 15 Pro",
+    "avito_value": 18720713
+  },
+  {
+    "id": "15-pro-max",
+    "gen": 15,
+    "label": "iPhone 15 Pro Max",
+    "avito_value": 18720875
+  },
+  {
+    "id": "16",
+    "gen": 16,
+    "label": "iPhone 16",
+    "avito_value": 22121571
+  },
+  {
+    "id": "16-plus",
+    "gen": 16,
+    "label": "iPhone 16 Plus",
+    "avito_value": 22121572
+  },
+  {
+    "id": "16-pro",
+    "gen": 16,
+    "label": "iPhone 16 Pro",
+    "avito_value": 22121573
+  },
+  {
+    "id": "16-pro-max",
+    "gen": 16,
+    "label": "iPhone 16 Pro Max",
+    "avito_value": 22121574
+  },
+  {
+    "id": "16-e",
+    "gen": 16,
+    "label": "iPhone 16e",
+    "avito_value": 22313350
+  },
+  {
+    "id": "17",
+    "gen": 17,
+    "label": "iPhone 17",
+    "avito_value": 22446489
+  },
+  {
+    "id": "17-pro",
+    "gen": 17,
+    "label": "iPhone 17 Pro",
+    "avito_value": 22446491
+  },
+  {
+    "id": "17-pro-max",
+    "gen": 17,
+    "label": "iPhone 17 Pro Max",
+    "avito_value": 22446492
+  },
+  {
+    "id": "17-air",
+    "gen": 17,
+    "label": "iPhone Air",
+    "avito_value": 22446490
+  }
+]

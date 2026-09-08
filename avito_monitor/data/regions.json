@@ -1,0 +1,638 @@
+[
+  {
+    "slug": "all",
+    "name": "Вся Россия"
+  },
+  {
+    "slug": "moskva",
+    "name": "Москва"
+  },
+  {
+    "slug": "moskovskaya_oblast",
+    "name": "Московская область"
+  },
+  {
+    "slug": "sankt-peterburg",
+    "name": "Санкт-Петербург"
+  },
+  {
+    "slug": "leningradskaya_oblast",
+    "name": "Ленинградская область"
+  },
+  {
+    "slug": "abakan",
+    "name": "Абакан",
+    "tz": "Asia/Krasnoyarsk"
+  },
+  {
+    "slug": "anapa",
+    "name": "Анапа"
+  },
+  {
+    "slug": "angarsk",
+    "name": "Ангарск",
+    "tz": "Asia/Irkutsk"
+  },
+  {
+    "slug": "arkhangelsk",
+    "name": "Архангельск"
+  },
+  {
+    "slug": "armavir",
+    "name": "Армавир"
+  },
+  {
+    "slug": "astrakhan",
+    "name": "Астрахань",
+    "tz": "Europe/Samara"
+  },
+  {
+    "slug": "balashikha",
+    "name": "Балашиха"
+  },
+  {
+    "slug": "barnaul",
+    "name": "Барнаул",
+    "tz": "Asia/Barnaul"
+  },
+  {
+    "slug": "belgorod",
+    "name": "Белгород"
+  },
+  {
+    "slug": "biysk",
+    "name": "Бийск",
+    "tz": "Asia/Barnaul"
+  },
+  {
+    "slug": "blagoveshchensk",
+    "name": "Благовещенск",
+    "tz": "Asia/Magadan"
+  },
+  {
+    "slug": "bratsk",
+    "name": "Братск",
+    "tz": "Asia/Irkutsk"
+  },
+  {
+    "slug": "bryansk",
+    "name": "Брянск"
+  },
+  {
+    "slug": "velikiy_novgorod",
+    "name": "Великий Новгород"
+  },
+  {
+    "slug": "vidnoe",
+    "name": "Видное"
+  },
+  {
+    "slug": "vladivostok",
+    "name": "Владивосток",
+    "tz": "Asia/Vladivostok"
+  },
+  {
+    "slug": "vladikavkaz",
+    "name": "Владикавказ"
+  },
+  {
+    "slug": "vladimir",
+    "name": "Владимир"
+  },
+  {
+    "slug": "volgograd",
+    "name": "Волгоград",
+    "tz": "Europe/Samara"
+  },
+  {
+    "slug": "volzhskiy",
+    "name": "Волжский",
+    "tz": "Europe/Samara"
+  },
+  {
+    "slug": "vologda",
+    "name": "Вологда"
+  },
+  {
+    "slug": "voronezh",
+    "name": "Воронеж"
+  },
+  {
+    "slug": "gorno-altaysk",
+    "name": "Горно-Алтайск",
+    "tz": "Asia/Barnaul"
+  },
+  {
+    "slug": "grozny",
+    "name": "Грозный"
+  },
+  {
+    "slug": "dzerzhinsk",
+    "name": "Дзержинск"
+  },
+  {
+    "slug": "domodedovo",
+    "name": "Домодедово"
+  },
+  {
+    "slug": "ekaterinburg",
+    "name": "Екатеринбург",
+    "tz": "Asia/Yekaterinburg"
+  },
+  {
+    "slug": "essentuki",
+    "name": "Ессентуки"
+  },
+  {
+    "slug": "zheleznodorozhnyy",
+    "name": "Железнодорожный"
+  },
+  {
+    "slug": "zhukovskiy",
+    "name": "Жуковский"
+  },
+  {
+    "slug": "ivanovo",
+    "name": "Иваново"
+  },
+  {
+    "slug": "izhevsk",
+    "name": "Ижевск",
+    "tz": "Asia/Yekaterinburg"
+  },
+  {
+    "slug": "irkutsk",
+    "name": "Иркутск",
+    "tz": "Asia/Irkutsk"
+  },
+  {
+    "slug": "yoshkar-ola",
+    "name": "Йошкар-Ола"
+  },
+  {
+    "slug": "kazan",
+    "name": "Казань"
+  },
+  {
+    "slug": "kaliningrad",
+    "name": "Калининград",
+    "tz": "Europe/Kaliningrad"
+  },
+  {
+    "slug": "kaluga",
+    "name": "Калуга"
+  },
+  {
+    "slug": "kamensk-uralskiy",
+    "name": "Каменск-Уральский",
+    "tz": "Asia/Yekaterinburg"
+  },
+  {
+    "slug": "kemerovo",
+    "name": "Кемерово",
+    "tz": "Asia/Novokuznetsk"
+  },
+  {
+    "slug": "kerch",
+    "name": "Керчь"
+  },
+  {
+    "slug": "kislovodsk",
+    "name": "Кисловодск"
+  },
+  {
+    "slug": "klin",
+    "name": "Клин"
+  },
+  {
+    "slug": "kovrov",
+    "name": "Ковров"
+  },
+  {
+    "slug": "kolomna",
+    "name": "Коломна"
+  },
+  {
+    "slug": "komsomolsk-na-amure",
+    "name": "Комсомольск-на-Амуре",
+    "tz": "Asia/Vladivostok"
+  },
+  {
+    "slug": "korolev",
+    "name": "Королёв"
+  },
+  {
+    "slug": "kostroma",
+    "name": "Кострома"
+  },
+  {
+    "slug": "krasnogorsk",
+    "name": "Красногорск"
+  },
+  {
+    "slug": "krasnodar",
+    "name": "Краснодар"
+  },
+  {
+    "slug": "krasnodarskiy_kray",
+    "name": "Краснодарский край"
+  },
+  {
+    "slug": "krasnoyarsk",
+    "name": "Красноярск",
+    "tz": "Asia/Krasnoyarsk"
+  },
+  {
+    "slug": "kurgan",
+    "name": "Курган",
+    "tz": "Asia/Yekaterinburg"
+  },
+  {
+    "slug": "kursk",
+    "name": "Курск"
+  },
+  {
+    "slug": "lipeck",
+    "name": "Липецк"
+  },
+  {
+    "slug": "lyubertsy",
+    "name": "Люберцы"
+  },
+  {
+    "slug": "magnitogorsk",
+    "name": "Магнитогорск",
+    "tz": "Asia/Yekaterinburg"
+  },
+  {
+    "slug": "maykop",
+    "name": "Майкоп"
+  },
+  {
+    "slug": "mahachkala",
+    "name": "Махачкала"
+  },
+  {
+    "slug": "mineralnye_vody",
+    "name": "Минеральные Воды"
+  },
+  {
+    "slug": "murmansk",
+    "name": "Мурманск"
+  },
+  {
+    "slug": "murom",
+    "name": "Муром"
+  },
+  {
+    "slug": "mytischi",
+    "name": "Мытищи"
+  },
+  {
+    "slug": "naberezhnye_chelny",
+    "name": "Набережные Челны"
+  },
+  {
+    "slug": "nalchik",
+    "name": "Нальчик"
+  },
+  {
+    "slug": "naro-fominsk",
+    "name": "Наро-Фоминск"
+  },
+  {
+    "slug": "nahodka",
+    "name": "Находка",
+    "tz": "Asia/Vladivostok"
+  },
+  {
+    "slug": "nevinnomyssk",
+    "name": "Невинномысск"
+  },
+  {
+    "slug": "neftekamsk",
+    "name": "Нефтекамск",
+    "tz": "Asia/Yekaterinburg"
+  },
+  {
+    "slug": "nefteyugansk",
+    "name": "Нефтеюганск",
+    "tz": "Asia/Yekaterinburg"
+  },
+  {
+    "slug": "nizhnevartovsk",
+    "name": "Нижневартовск",
+    "tz": "Asia/Yekaterinburg"
+  },
+  {
+    "slug": "nizhnekamsk",
+    "name": "Нижнекамск"
+  },
+  {
+    "slug": "nizhniy_novgorod",
+    "name": "Нижний Новгород"
+  },
+  {
+    "slug": "nizhniy_tagil",
+    "name": "Нижний Тагил",
+    "tz": "Asia/Yekaterinburg"
+  },
+  {
+    "slug": "novokuznetsk",
+    "name": "Новокузнецк",
+    "tz": "Asia/Novokuznetsk"
+  },
+  {
+    "slug": "novorossiysk",
+    "name": "Новороссийск"
+  },
+  {
+    "slug": "novosibirsk",
+    "name": "Новосибирск",
+    "tz": "Asia/Novosibirsk"
+  },
+  {
+    "slug": "novyy_urengoy",
+    "name": "Новый Уренгой",
+    "tz": "Asia/Yekaterinburg"
+  },
+  {
+    "slug": "noginsk",
+    "name": "Ногинск"
+  },
+  {
+    "slug": "norilsk",
+    "name": "Норильск",
+    "tz": "Asia/Krasnoyarsk"
+  },
+  {
+    "slug": "noyabrsk",
+    "name": "Ноябрьск",
+    "tz": "Asia/Yekaterinburg"
+  },
+  {
+    "slug": "obninsk",
+    "name": "Обнинск"
+  },
+  {
+    "slug": "odintsovo",
+    "name": "Одинцово"
+  },
+  {
+    "slug": "omsk",
+    "name": "Омск",
+    "tz": "Asia/Omsk"
+  },
+  {
+    "slug": "orel",
+    "name": "Орёл"
+  },
+  {
+    "slug": "orenburg",
+    "name": "Оренбург",
+    "tz": "Asia/Yekaterinburg"
+  },
+  {
+    "slug": "orehovo-zuevo",
+    "name": "Орехово-Зуево"
+  },
+  {
+    "slug": "orsk",
+    "name": "Орск",
+    "tz": "Asia/Yekaterinburg"
+  },
+  {
+    "slug": "penza",
+    "name": "Пенза"
+  },
+  {
+    "slug": "perm",
+    "name": "Пермь",
+    "tz": "Asia/Yekaterinburg"
+  },
+  {
+    "slug": "petrozavodsk",
+    "name": "Петрозаводск"
+  },
+  {
+    "slug": "petropavlovsk-kamchatskiy",
+    "name": "Петропавловск-Камчатский",
+    "tz": "Asia/Kamchatka"
+  },
+  {
+    "slug": "podolsk",
+    "name": "Подольск"
+  },
+  {
+    "slug": "pskov",
+    "name": "Псков"
+  },
+  {
+    "slug": "pushkino",
+    "name": "Пушкино"
+  },
+  {
+    "slug": "pyatigorsk",
+    "name": "Пятигорск"
+  },
+  {
+    "slug": "ramenskoe",
+    "name": "Раменское"
+  },
+  {
+    "slug": "rostov-na-donu",
+    "name": "Ростов-на-Дону"
+  },
+  {
+    "slug": "rubtsovsk",
+    "name": "Рубцовск",
+    "tz": "Asia/Barnaul"
+  },
+  {
+    "slug": "ryazan",
+    "name": "Рязань"
+  },
+  {
+    "slug": "samara",
+    "name": "Самара",
+    "tz": "Europe/Samara"
+  },
+  {
+    "slug": "saransk",
+    "name": "Саранск"
+  },
+  {
+    "slug": "saratov",
+    "name": "Саратов",
+    "tz": "Europe/Samara"
+  },
+  {
+    "slug": "sevastopol",
+    "name": "Севастополь"
+  },
+  {
+    "slug": "severodvinsk",
+    "name": "Северодвинск"
+  },
+  {
+    "slug": "sergiev_posad",
+    "name": "Сергиев Посад"
+  },
+  {
+    "slug": "serpuhov",
+    "name": "Серпухов"
+  },
+  {
+    "slug": "simferopol",
+    "name": "Симферополь"
+  },
+  {
+    "slug": "smolensk",
+    "name": "Смоленск"
+  },
+  {
+    "slug": "sochi",
+    "name": "Сочи"
+  },
+  {
+    "slug": "stavropol",
+    "name": "Ставрополь"
+  },
+  {
+    "slug": "staryy_oskol",
+    "name": "Старый Оскол"
+  },
+  {
+    "slug": "sterlitamak",
+    "name": "Стерлитамак",
+    "tz": "Asia/Yekaterinburg"
+  },
+  {
+    "slug": "surgut",
+    "name": "Сургут",
+    "tz": "Asia/Yekaterinburg"
+  },
+  {
+    "slug": "syzran",
+    "name": "Сызрань",
+    "tz": "Europe/Samara"
+  },
+  {
+    "slug": "syktyvkar",
+    "name": "Сыктывкар"
+  },
+  {
+    "slug": "taganrog",
+    "name": "Таганрог"
+  },
+  {
+    "slug": "tambov",
+    "name": "Тамбов"
+  },
+  {
+    "slug": "tver",
+    "name": "Тверь"
+  },
+  {
+    "slug": "tolyatti",
+    "name": "Тольятти",
+    "tz": "Europe/Samara"
+  },
+  {
+    "slug": "tomsk",
+    "name": "Томск",
+    "tz": "Asia/Tomsk"
+  },
+  {
+    "slug": "tula",
+    "name": "Тула"
+  },
+  {
+    "slug": "tyumen",
+    "name": "Тюмень",
+    "tz": "Asia/Yekaterinburg"
+  },
+  {
+    "slug": "ulan-ude",
+    "name": "Улан-Удэ",
+    "tz": "Asia/Irkutsk"
+  },
+  {
+    "slug": "ulyanovsk",
+    "name": "Ульяновск",
+    "tz": "Europe/Samara"
+  },
+  {
+    "slug": "ussuriysk",
+    "name": "Уссурийск",
+    "tz": "Asia/Vladivostok"
+  },
+  {
+    "slug": "ufa",
+    "name": "Уфа",
+    "tz": "Asia/Yekaterinburg"
+  },
+  {
+    "slug": "khabarovsk",
+    "name": "Хабаровск",
+    "tz": "Asia/Vladivostok"
+  },
+  {
+    "slug": "khanty-mansiysk",
+    "name": "Ханты-Мансийск",
+    "tz": "Asia/Yekaterinburg"
+  },
+  {
+    "slug": "himki",
+    "name": "Химки"
+  },
+  {
+    "slug": "cheboksary",
+    "name": "Чебоксары"
+  },
+  {
+    "slug": "chelyabinsk",
+    "name": "Челябинск",
+    "tz": "Asia/Yekaterinburg"
+  },
+  {
+    "slug": "cherepovets",
+    "name": "Череповец"
+  },
+  {
+    "slug": "cherkessk",
+    "name": "Черкесск"
+  },
+  {
+    "slug": "chita",
+    "name": "Чита",
+    "tz": "Asia/Chita"
+  },
+  {
+    "slug": "shchelkovo",
+    "name": "Щёлково"
+  },
+  {
+    "slug": "elektrostal",
+    "name": "Электросталь"
+  },
+  {
+    "slug": "engels",
+    "name": "Энгельс",
+    "tz": "Europe/Samara"
+  },
+  {
+    "slug": "yuzhno-sakhalinsk",
+    "name": "Южно-Сахалинск",
+    "tz": "Asia/Sakhalin"
+  },
+  {
+    "slug": "yakutsk",
+    "name": "Якутск",
+    "tz": "Asia/Yakutsk"
+  },
+  {
+    "slug": "yaroslavl",
+    "name": "Ярославль"
+  }
+]
