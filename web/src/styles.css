@@ -277,10 +277,30 @@ html[data-theme="light"] .toast {
   }
 
   /* ── Header ── */
+  .site-header {
+    position: static;
+    z-index: auto;
+    width: 100%;
+    max-width: 100%;
+    border-bottom: none;
+    border-radius: 0 0 1.5rem 1.5rem;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--color-surface) 92%, var(--color-ink));
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 10px 28px rgb(0 0 0 / 0.22);
+  }
+
+  html[data-theme="light"] .site-header {
+    background: color-mix(in srgb, var(--color-surface) 88%, white);
+    box-shadow: 0 6px 22px rgb(15 23 42 / 0.1);
+  }
+
   .shell-header {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
+    justify-content: space-between;
     gap: 0.5rem 0.75rem;
     width: 100%;
     min-width: 0;
@@ -3076,4 +3096,52 @@ body.filters-drawer-open {
 
 .switch input:disabled + .switch-track {
   opacity: 0.45;
+}
+
+/* Auth screen — вне @layer, чтобы не перебивалось mobile modal styles */
+body.auth-gate {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+
+body.auth-gate .auth-screen {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 0;
+  padding: 1.5rem 1rem 2rem;
+}
+
+body.auth-gate .auth-screen.hidden {
+  display: none;
+}
+
+body.auth-gate .auth-screen-card {
+  width: 100%;
+  max-width: 22rem;
+  margin-inline: auto;
+}
+
+@media (max-width: 639px) {
+  body.auth-gate .auth-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    flex: none;
+    padding:
+      calc(4rem + env(safe-area-inset-top))
+      max(1rem, env(safe-area-inset-right))
+      max(1.5rem, env(safe-area-inset-bottom))
+      max(1rem, env(safe-area-inset-left));
+    align-items: center;
+    justify-content: center;
+  }
+
+  body.auth-gate .site-header {
+    position: relative;
+    z-index: 20;
+  }
 }

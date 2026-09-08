@@ -35,7 +35,7 @@ userMenuRef = mountUserMenu({
 });
 
 const app = document.getElementById("app") as HTMLElement;
-const authModal = document.getElementById("auth-modal") as HTMLElement;
+const authScreen = document.getElementById("auth-screen") as HTMLElement;
 const authLogin = document.getElementById("auth-login") as HTMLInputElement;
 const authPassword = document.getElementById("auth-password") as HTMLInputElement;
 const authSubmit = document.getElementById("auth-submit") as HTMLButtonElement;
@@ -45,7 +45,8 @@ const authBtn = document.getElementById("auth-btn") as HTMLButtonElement;
   const shellAppTools = document.getElementById("shell-app-tools") as HTMLElement;
 
 function showAuth(): void {
-  authModal.classList.remove("hidden");
+  document.body.classList.add("auth-gate");
+  authScreen.classList.remove("hidden");
   app.classList.add("hidden");
   shellUser.classList.add("hidden");
   shellAppTools.classList.add("hidden");
@@ -56,7 +57,8 @@ function showAuth(): void {
 }
 
 function showApp(username: string): void {
-  authModal.classList.add("hidden");
+  document.body.classList.remove("auth-gate");
+  authScreen.classList.add("hidden");
   app.classList.remove("hidden");
   userMenuRef?.setUsername(username);
   shellUser.classList.remove("hidden");

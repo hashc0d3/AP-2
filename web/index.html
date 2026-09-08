@@ -11,7 +11,7 @@
   <title>Сигнал — мониторинг Avito</title>
 </head>
 <body>
-  <header class="sticky top-0 z-30 border-b border-edge bg-ink/90 backdrop-blur-md">
+  <header class="site-header">
     <div class="wrap shell-header shell-header--app">
       <div class="shell-actions">
         <div class="shell-app-tools hidden" id="shell-app-tools">
@@ -157,10 +157,10 @@
     </aside>
   </div>
 
-  <div class="modal-back" id="auth-modal">
-    <div class="panel relative max-w-sm">
-      <h2 class="text-xl font-semibold">Вход</h2>
-      <p class="mt-1.5 hint">Мониторинг объявлений Avito</p>
+  <main class="auth-screen" id="auth-screen">
+    <div class="auth-screen-card panel">
+      <h2 class="text-xl font-semibold text-center">Вход</h2>
+      <p class="mt-1.5 hint text-center">Мониторинг объявлений Avito</p>
       <form id="auth-form" class="mt-5 space-y-4" autocomplete="on">
         <div class="space-y-1.5">
           <label class="hint" for="auth-login">Логин</label>
@@ -170,11 +170,11 @@
           <label class="hint" for="auth-password">Пароль</label>
           <input id="auth-password" type="password" class="field" autocomplete="current-password" />
         </div>
-        <p class="hint min-h-5 text-sm text-red-400" id="auth-hint"></p>
+        <p class="hint min-h-5 text-center text-sm text-red-400" id="auth-hint"></p>
         <button class="btn-primary w-full" id="auth-submit" type="submit">Войти</button>
       </form>
     </div>
-  </div>
+  </main>
 
   <div class="modal-back hidden" id="avito-modal">
     <div class="panel relative max-w-lg">
