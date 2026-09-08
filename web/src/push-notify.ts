@@ -168,7 +168,7 @@ export async function requestPushPermission(): Promise<boolean> {
   }
 }
 
-export async function subscribeWebPush(): Promise<boolean> {
+export async function subscribeWebPush(options?: { test?: boolean }): Promise<boolean> {
   if (!canUsePush() || Notification.permission !== "granted") return false;
 
   const publicKey = await fetchVapidPublicKey();
@@ -197,7 +197,8 @@ export async function subscribeWebPush(): Promise<boolean> {
     });
   }
 
-  const res = await fetch("/api/push/subscribe", {
+  const subscribeUrl = options?.test ? "/api/push/subscribe?test=1" : "/api/push/subscribe";
+  const res = await fetch(subscribeUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(subscription.toJSON()),
@@ -253,7 +254,7 @@ export async function enableWebPush(): Promise<{ ok: boolean; reason?: PushBlock
     return { ok: false, reason: pushBlockReason() || "denied" };
   }
 
-  const subscribed = await subscribeWebPush();
+  const subscribed = await subscribeWebPush({ test: true });
   return subscribed ? { ok: true } : { ok: false, reason: "default" };
 }
 
@@ -287,16 +288,22 @@ export function showTestNotification(): boolean {
   }
 }
 
+function adNotifyLine(ad: Ad): string {
+  const title = ad.title?.trim() || "Новое объявление";
+  const price = ad.price?.trim();
+  if (price && price !== "—") return `${title} · ${price}`;
+  return title;
+}
+
 /** Fallback, когда Web Push не подписан (вкладка открыта). */
 export function notifyNewAds(ads: Ad[]): void {
   if (!canUsePush() || Notification.permission !== "granted" || !ads.length) return;
   if (isWebPushSubscribed()) return;
 
-  const first = ads[0];
-  const title = first.title?.trim() || "Новое объявление";
+  const line = adNotifyLine(ads[0]);
   const body = ads.length === 1
-    ? title
-    : `${ads.length} новых объявлений · ${title}`;
+    ? line
+    : `${ads.length} новых объявлений · ${line}`;
 
   try {
     const notification = new Notification("Сигнал", {

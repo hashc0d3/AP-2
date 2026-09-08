@@ -153,10 +153,18 @@ def subscription_count() -> int:
         return len(_load())
 
 
+def _ad_notify_line(ad: dict) -> str:
+    title = str(ad.get("title") or "").strip() or "Новое объявление"
+    price = str(ad.get("price") or "").strip()
+    if price and price not in {"—", "-"}:
+        return f"{title} · {price}"
+    return title
+
+
 def _format_payload(ads: list[dict]) -> str:
     first = ads[0] if ads else {}
-    title = str(first.get("title") or "").strip() or "Новое объявление"
-    body = title if len(ads) == 1 else f"{len(ads)} новых объявлений · {title}"
+    line = _ad_notify_line(first)
+    body = line if len(ads) == 1 else f"{len(ads)} новых объявлений · {line}"
     return json.dumps({"title": "Сигнал", "body": body, "url": "/"}, ensure_ascii=False)
 
 

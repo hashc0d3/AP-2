@@ -521,7 +521,8 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as err:
                 self._json(400, {"error": str(err)})
                 return
-            send_test_push()
+            if parse_qs(parsed.query).get("test", [""])[0] in {"1", "true", "yes"}:
+                send_test_push()
             self._json(200, {"ok": True, "subscriptions": total})
             return
         if parsed.path == "/api/push/unsubscribe":

@@ -148,8 +148,8 @@ export function mountUserMenu(opts: UserMenuOptions): {
     const pwaHint = pwaInstallHint();
     if (!isWebPushSubscribed() && showTestNotification()) {
       showToast(pwaHint || "Уведомления включены (вкладка)", pwaHint ? "info" : "success");
-    } else {
-      showToast(pwaHint || "Уведомления включены", pwaHint ? "info" : "success");
+    } else if (pwaHint) {
+      showToast(pwaHint, "info");
     }
     return true;
   };
