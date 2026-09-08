@@ -17,11 +17,13 @@ function isYandexBrowser(): boolean {
 }
 
 export function canUsePush(): boolean {
-  return typeof window !== "undefined"
-    && window.isSecureContext
-    && "Notification" in window
-    && "serviceWorker" in navigator
-    && "PushManager" in window;
+  return (
+    typeof window !== "undefined" &&
+    window.isSecureContext &&
+    "Notification" in window &&
+    "serviceWorker" in navigator &&
+    "PushManager" in window
+  );
 }
 
 export function hasNotificationApi(): boolean {
@@ -68,7 +70,7 @@ export function pushEnableHint(reason: PushBlockReason | null = pushBlockReason(
         ? "Нажмите «Разрешить» — появится системный запрос"
         : "Разрешите уведомления во всплывающем окне";
     case "server":
-      return "На сервере не настроены VAPID-ключи — см. tools/generate_vapid.py";
+      return "На сервере не настроены VAPID-ключи — см. docs/deployment.md";
     default:
       return "Не удалось включить уведомления";
   }
@@ -134,7 +136,7 @@ async function fetchVapidPublicKey(): Promise<string | null> {
   try {
     const res = await fetch("/api/push/vapid");
     if (!res.ok) return null;
-    const data = await res.json() as { configured?: boolean; publicKey?: string };
+    const data = (await res.json()) as { configured?: boolean; publicKey?: string };
     return data.configured && data.publicKey ? data.publicKey : null;
   } catch {
     return null;
@@ -156,7 +158,7 @@ export async function requestPushPermission(): Promise<boolean> {
 
     if ("permissions" in navigator) {
       try {
-        const status = await navigator.permissions.query({ name: "notifications" as PermissionName });
+        const status = await navigator.permissions.query({ name: "notifications" });
         return status.state === "granted";
       } catch {
         /* empty */
@@ -297,13 +299,12 @@ function adNotifyLine(ad: Ad): string {
 
 /** Fallback, когда Web Push не подписан (вкладка открыта). */
 export function notifyNewAds(ads: Ad[]): void {
-  if (!canUsePush() || Notification.permission !== "granted" || !ads.length) return;
+  const first = ads[0];
+  if (!canUsePush() || Notification.permission !== "granted" || !first) return;
   if (isWebPushSubscribed()) return;
 
-  const line = adNotifyLine(ads[0]);
-  const body = ads.length === 1
-    ? line
-    : `${ads.length} новых объявлений · ${line}`;
+  const line = adNotifyLine(first);
+  const body = ads.length === 1 ? line : `${ads.length} новых объявлений · ${line}`;
 
   try {
     const notification = new Notification("Сигнал", {
@@ -321,8 +322,10 @@ export function notifyNewAds(ads: Ad[]): void {
 }
 
 export function isStandalonePwa(): boolean {
-  return window.matchMedia("(display-mode: standalone)").matches
-    || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+  return (
+    window.matchMedia("(display-mode: standalone)").matches ||
+    (navigator as Navigator & { standalone?: boolean }).standalone === true
+  );
 }
 
 export function pwaInstallHint(): string | null {

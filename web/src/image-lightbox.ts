@@ -29,10 +29,10 @@ function ensureRoot(): HTMLElement {
   `;
   document.body.appendChild(root);
 
-  imgEl = root.querySelector(".image-lightbox-img") as HTMLImageElement;
-  counterEl = root.querySelector(".image-lightbox-counter") as HTMLElement;
-  prevBtn = root.querySelector(".image-lightbox-nav.prev") as HTMLButtonElement;
-  nextBtn = root.querySelector(".image-lightbox-nav.next") as HTMLButtonElement;
+  imgEl = root.querySelector(".image-lightbox-img");
+  counterEl = root.querySelector(".image-lightbox-counter");
+  prevBtn = root.querySelector(".image-lightbox-nav.prev");
+  nextBtn = root.querySelector(".image-lightbox-nav.next");
 
   root.querySelector(".image-lightbox-back")?.addEventListener("click", closeImageLightbox);
   root.querySelector(".image-lightbox-close")?.addEventListener("click", closeImageLightbox);

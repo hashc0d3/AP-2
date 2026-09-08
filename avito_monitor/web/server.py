@@ -5,7 +5,7 @@ JSON-эндпоинты из :mod:`~avito_monitor.web.routes` и держать 
 ``/events``, по которому новые объявления приходят в браузер без опроса.
 
 Взят стандартный ``ThreadingHTTPServer``: нагрузка — один-два браузера,
-внешний веб-сервер и TLS обеспечивает nginx (см. ``DEPLOY.md``).
+внешний веб-сервер и TLS обеспечивает nginx (см. ``docs/deployment.md``).
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import time
 import webbrowser
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import ParseResult, parse_qs, urlparse
 
 import requests
 from loguru import logger
@@ -43,6 +43,11 @@ _STARTUP_GRACE = 0.2
 
 # Как часто отправлять комментарий-пинг, чтобы прокси не закрыл SSE-поток.
 SSE_PING_INTERVAL = 20.0
+
+# Самое большое тело запроса — импорт cookies Avito, и он на два порядка
+# меньше. Ограничение нужно, чтобы заявленный Content-Length не заставил
+# сервер выделить память под что угодно.
+MAX_BODY_BYTES = 1_048_576
 
 CONTENT_TYPES = {
     ".css": "text/css; charset=utf-8",
@@ -217,9 +222,31 @@ class Handler(BaseHTTPRequestHandler):
             return True
         return False
 
-    def _build_request(self, path: str, query: str) -> Request:
-        length = int(self.headers.get("Content-Length") or 0)
-        body = self.rfile.read(length) if length > 0 else b""
+    def _read_body(self) -> bytes | None:
+        """Считать тело запроса целиком.
+
+        Читать нужно всегда, даже когда обработчику тело не нужно:
+        непрочитанные байты остаются в сокете, и закрытие соединения
+        превращается в RST — клиент теряет уже отправленный ответ.
+
+        ``None`` — тело больше :data:`MAX_BODY_BYTES`, читать его мы не станем.
+        """
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return b""
+        if length <= 0:
+            return b""
+        if length > MAX_BODY_BYTES:
+            return None
+        return self.rfile.read(length)
+
+    def _reject_large_body(self) -> None:
+        # Тело осталось непрочитанным, поэтому соединение переиспользовать нельзя.
+        self.close_connection = True
+        self._send_response(Response.error(413, "Тело запроса слишком велико"))
+
+    def _build_request(self, path: str, query: str, body: bytes) -> Request:
         return Request(
             path=path,
             query=parse_qs(query),
@@ -327,6 +354,10 @@ class Handler(BaseHTTPRequestHandler):
     # ── Точки входа ─────────────────────────────────────────────────────
 
     def do_GET(self) -> None:  # noqa: N802 — имя задаёт BaseHTTPRequestHandler
+        body = self._read_body()
+        if body is None:
+            self._reject_large_body()
+            return
         if self._foreign_host():
             return
         parsed = urlparse(self.path)
@@ -343,15 +374,19 @@ class Handler(BaseHTTPRequestHandler):
             self._serve_events()
             return
 
-        self._dispatch("GET", parsed)
+        self._dispatch("GET", parsed, body)
 
     def do_POST(self) -> None:  # noqa: N802 — имя задаёт BaseHTTPRequestHandler
+        body = self._read_body()
+        if body is None:
+            self._reject_large_body()
+            return
         if self._foreign_host():
             return
-        self._dispatch("POST", urlparse(self.path))
+        self._dispatch("POST", urlparse(self.path), body)
 
-    def _dispatch(self, method: str, parsed) -> None:
-        response = dispatch(method, self._build_request(parsed.path, parsed.query))
+    def _dispatch(self, method: str, parsed: ParseResult, body: bytes) -> None:
+        response = dispatch(method, self._build_request(parsed.path, parsed.query, body))
         if response is None:
             self.send_error(404)
             return

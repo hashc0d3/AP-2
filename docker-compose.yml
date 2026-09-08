@@ -7,7 +7,7 @@ services:
     env_file:
       - .env
     # Наружу порт не публикуем: TLS и домен обеспечивает nginx на хосте,
-    # он проксирует на 127.0.0.1 (см. DEPLOY.md).
+    # он проксирует на 127.0.0.1 (см. docs/deployment.md).
     ports:
       - "127.0.0.1:${WEB_PORT:-8765}:8765"
     environment:

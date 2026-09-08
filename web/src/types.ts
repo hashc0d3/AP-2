@@ -1,3 +1,5 @@
+/** Формы данных, которые приходят от сервера. Совпадают с ответами API. */
+
 export type AuthStatus = {
   logged_in: boolean;
   username: string;
@@ -6,40 +8,11 @@ export type AuthStatus = {
 
 export type Region = { slug: string; name: string };
 export type Category = { id: string; name: string };
+
+/** «query» — поиск по региону и категории, «url» — по готовой ссылке Avito. */
 export type SearchMode = "query" | "url";
 
-export type Account = {
-  id: string;
-  phone: string;
-  phone_label: string;
-  created_at: number;
-};
-
-export type BillingStatus = {
-  logged_in: boolean;
-  account: Account | null;
-  created?: boolean;
-  active: boolean;
-  plan: "none" | "trial" | "paid" | "expired" | string;
-  trial_used: boolean;
-  trial_available: boolean;
-  expires_at: number;
-  seconds_left: number;
-  phone: string;
-  price: number;
-  currency: string;
-  paid_days: number;
-  trial_hours: number;
-};
-
-export type PromoQuote = {
-  code: string;
-  price: number;
-  discount: number;
-  note: string;
-  extra_days?: number;
-};
-
+/** Состояние текущего поиска: ответ GET /api/status и POST /api/search. */
 export type SearchState = {
   running: boolean;
   query: string;
@@ -53,46 +26,31 @@ export type SearchState = {
   iphone_models?: string[] | null;
 };
 
-export type AvitoConnectStatus = {
-  running: boolean;
-  step: string;
-  error?: string;
+/** Сессия Avito, сохранённая пользователем для кнопки «Позвонить». */
+export type AvitoSession = {
   connected: boolean;
-  label?: string;
-  phone?: string;
-};
-
-export type AvitoSession = AvitoConnectStatus & {
   logged_in: boolean;
+  label?: string;
   saved_at?: number;
-  connect?: AvitoConnectStatus;
+  error?: string;
 };
 
 export type AvitoPhoneResult = {
   ok: boolean;
   phone?: string;
   error?: string;
+  /** Причина отказа: no_session, not_logged_in, auth_required. */
   code?: string;
 };
 
+/** Баланс сервиса cookies. */
 export type SpfaBalance = {
   success?: boolean;
   balance: number;
   error?: string;
 };
 
-export type PriceBatchStatus = {
-  success?: boolean;
-  status?: string;
-  task_id?: string;
-  results?: unknown[];
-  price_per_ad?: string;
-  total_cost?: string;
-  billed?: boolean;
-  error?: string;
-  message?: string;
-};
-
+/** Объявление в ленте. Собирается сервером в avito_monitor/avito/items.py. */
 export type Ad = {
   id: string | number;
   title: string;
@@ -104,6 +62,7 @@ export type Ad = {
   can_message: boolean;
   seller?: string;
   published?: string;
+  /** Unix-время публикации в секундах. */
   ts?: number;
   description?: string;
 };

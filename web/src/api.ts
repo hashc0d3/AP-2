@@ -1,133 +1,184 @@
-import type { Ad, AuthStatus, AvitoPhoneResult, AvitoSession, Category, Region, SearchMode, SearchState, SpfaBalance } from "./types";
+/**
+ * Единственная точка обращения к серверу.
+ *
+ * Все запросы идут через `request`, поэтому таймаут, разбор ошибок и
+ * понятные сообщения про обрыв связи описаны один раз. Пути эндпоинтов
+ * не должны встречаться больше нигде в коде.
+ */
 
-async function readJson<T>(res: Response): Promise<T> {
-  const data = (await res.json()) as T & { error?: string };
-  if (!res.ok) {
-    throw new Error(data.error || `Ошибка ${res.status}`);
-  }
-  return data;
-}
+import type {
+  Ad,
+  AuthStatus,
+  AvitoPhoneResult,
+  AvitoSession,
+  Category,
+  Region,
+  SearchMode,
+  SearchState,
+  SpfaBalance,
+} from "./types";
 
-async function fetchJson<T>(url: string, init?: RequestInit, timeoutMs = 45000): Promise<T> {
+/** Обычный запрос: сервер отвечает из памяти. */
+const DEFAULT_TIMEOUT_MS = 15000;
+
+/**
+ * Запуск поиска: сервер может обращаться к внешнему сервису за адресом
+ * API Avito, и это заметно дольше остальных запросов.
+ */
+const START_SEARCH_TIMEOUT_MS = 45000;
+
+const JSON_HEADERS = { "Content-Type": "application/json" };
+
+type RequestOptions = {
+  method?: "GET" | "POST";
+  body?: unknown;
+  timeoutMs?: number;
+};
+
+async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { method = "GET", body, timeoutMs = DEFAULT_TIMEOUT_MS } = options;
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, { ...init, signal: controller.signal });
+    const response = await fetch(path, {
+      method,
+      signal: controller.signal,
+      ...(body === undefined ? {} : { headers: JSON_HEADERS, body: JSON.stringify(body) }),
+    });
     return await readJson<T>(response);
   } catch (err) {
-    if (err instanceof DOMException && err.name === "AbortError") {
-      throw new Error("Сервер не ответил вовремя — проверьте, что parser.py запущен");
-    }
-    if (err instanceof TypeError) {
-      throw new Error("Нет связи с сервером — запустите parser.py");
-    }
-    throw err;
+    throw asFriendlyError(err);
   } finally {
     window.clearTimeout(timer);
   }
 }
 
+async function readJson<T>(response: Response): Promise<T> {
+  const payload = (await response.json().catch(() => null)) as (T & { error?: string }) | null;
+  if (!response.ok) {
+    throw new Error(payload?.error || `Ошибка ${response.status}`);
+  }
+  if (payload === null) {
+    throw new Error("Сервер вернул неожиданный ответ");
+  }
+  return payload;
+}
+
+function asFriendlyError(err: unknown): Error {
+  if (err instanceof DOMException && err.name === "AbortError") {
+    return new Error("Сервер не ответил вовремя — проверьте, что приложение запущено");
+  }
+  // fetch бросает TypeError, когда до сервера вообще не дошли.
+  if (err instanceof TypeError) {
+    return new Error("Нет связи с сервером — проверьте, что приложение запущено");
+  }
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+export type StartSearchPayload = {
+  mode: SearchMode;
+  query?: string;
+  url?: string;
+  region?: string;
+  category?: string;
+  seller_skip?: string[];
+  iphone_models?: string[] | null;
+};
+
+function startSearchBody(payload: StartSearchPayload): Record<string, unknown> {
+  const sellerSkip = payload.seller_skip ?? [];
+  // Ключ iphone_models пропускаем, если он не задан: на сервере `null`
+  // означает «фильтр выключен», а отсутствие ключа — «не менять».
+  const models =
+    payload.iphone_models !== undefined ? { iphone_models: payload.iphone_models } : {};
+  if (payload.mode === "url") {
+    return {
+      mode: "url",
+      url: payload.url || payload.query || "",
+      seller_skip: sellerSkip,
+      ...models,
+    };
+  }
+  return {
+    mode: "query",
+    query: payload.query || "",
+    region: payload.region || "all",
+    category: payload.category || "apple_phones",
+    seller_skip: sellerSkip,
+    ...models,
+  };
+}
+
+/**
+ * Разбор вставленного JSON cookies: массив из Cookie-Editor или готовый
+ * объект. Ошибку разбора превращаем в понятный текст — пользователь
+ * вставляет JSON руками, и опечатка здесь дело обычное.
+ */
+function avitoSessionBody(raw: string): Record<string, unknown> {
+  const trimmed = raw.trim();
+  const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    throw new Error("Не удалось разобрать JSON — скопируйте его из Cookie-Editor целиком");
+  }
+  if (Array.isArray(parsed)) {
+    return { cookies: parsed, user_agent: userAgent };
+  }
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Ожидается список cookies или объект с полем cookies");
+  }
+  const fields = parsed as Record<string, unknown>;
+  return { ...fields, user_agent: fields.user_agent || userAgent };
+}
+
 export const api = {
-  authStatus(): Promise<AuthStatus> {
-    return fetch("/api/billing/status").then((r) => readJson<AuthStatus>(r));
-  },
-  login(login: string, password: string): Promise<AuthStatus> {
-    return fetch("/api/auth/login", {
+  // ── Вход ────────────────────────────────────────────────────────────
+  authStatus: (): Promise<AuthStatus> => request("/api/auth/status"),
+
+  login: (login: string, password: string): Promise<AuthStatus> =>
+    request("/api/auth/login", { method: "POST", body: { login, password } }),
+
+  logout: (): Promise<AuthStatus> => request("/api/auth/logout", { method: "POST" }),
+
+  // ── Поиск ───────────────────────────────────────────────────────────
+  status: (): Promise<SearchState> => request("/api/status"),
+
+  categories: (): Promise<Category[]> => request("/api/categories"),
+
+  regions: (query: string): Promise<Region[]> =>
+    request(`/api/regions?q=${encodeURIComponent(query)}`),
+
+  startSearch: (payload: StartSearchPayload): Promise<SearchState> =>
+    request("/api/search", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ login, password }),
-    }).then((r) => readJson<AuthStatus>(r));
-  },
-  logout(): Promise<AuthStatus> {
-    return fetch("/api/auth/logout", { method: "POST" }).then((r) => readJson<AuthStatus>(r));
-  },
-  status(): Promise<SearchState> {
-    return fetch("/api/status").then((r) => readJson<SearchState>(r));
-  },
-  categories(): Promise<Category[]> {
-    return fetch("/api/categories").then((r) => readJson<Category[]>(r));
-  },
-  regions(q: string): Promise<Region[]> {
-    return fetch("/api/regions?q=" + encodeURIComponent(q)).then((r) => readJson<Region[]>(r));
-  },
-  startSearch(payload: {
-    mode: SearchMode;
-    query?: string;
-    url?: string;
-    region?: string;
-    category?: string;
-    seller_skip?: string[];
-    iphone_models?: string[] | null;
-  }): Promise<SearchState> {
-    const sellerSkip = payload.seller_skip ?? [];
-    const iphoneModels = payload.iphone_models;
-    const body = payload.mode === "url"
-      ? {
-        mode: "url",
-        url: payload.url || payload.query || "",
-        seller_skip: sellerSkip,
-        ...(iphoneModels !== undefined ? { iphone_models: iphoneModels } : {}),
-      }
-      : {
-        mode: "query",
-        query: payload.query || "",
-        region: payload.region || "all",
-        category: payload.category || "apple_phones",
-        seller_skip: sellerSkip,
-        ...(iphoneModels !== undefined ? { iphone_models: iphoneModels } : {}),
-      };
-    return fetchJson<SearchState>("/api/search", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-  },
-  stopSearch(): Promise<SearchState> {
-    return fetch("/api/search/stop", { method: "POST" }).then((r) => readJson<SearchState>(r));
-  },
-  ads(): Promise<Ad[]> {
-    return fetch("/api/ads").then((r) => readJson<Ad[]>(r));
-  },
-  reset(): Promise<void> {
-    return fetch("/api/reset", { method: "POST" }).then((r) => readJson(r)).then(() => undefined);
-  },
-  avitoSession(): Promise<AvitoSession> {
-    return fetch("/api/avito/session").then((r) => readJson<AvitoSession>(r));
-  },
-  importAvitoSession(raw: string): Promise<AvitoSession> {
-    const trimmed = raw.trim();
-    const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
-    let payload: Record<string, unknown>;
-    if (trimmed.startsWith("[")) {
-      payload = { cookies: JSON.parse(trimmed), user_agent: ua };
-    } else {
-      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-      payload = { ...parsed, user_agent: parsed.user_agent || ua };
-    }
-    return fetch("/api/avito/session/import", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }).then((r) => readJson<AvitoSession>(r));
-  },
-  clearAvitoSession(): Promise<AvitoSession> {
-    return fetch("/api/avito/session/clear", { method: "POST" }).then((r) => readJson<AvitoSession>(r));
-  },
-  avitoPhone(adId: string | number): Promise<AvitoPhoneResult> {
-    return fetch("/api/avito/phone", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ad_id: String(adId) }),
-    }).then((r) => readJson<AvitoPhoneResult>(r));
-  },
-  resourceBalance(): Promise<SpfaBalance> {
-    return fetch("/api/resource/balance").then((r) => readJson<SpfaBalance>(r));
-  },
-  updateSellerBlacklist(sellers: string[]): Promise<{ sellers: string[] }> {
-    return fetch("/api/seller-blacklist", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sellers }),
-    }).then((r) => readJson<{ sellers: string[] }>(r));
-  },
+      body: startSearchBody(payload),
+      timeoutMs: START_SEARCH_TIMEOUT_MS,
+    }),
+
+  stopSearch: (): Promise<SearchState> => request("/api/search/stop", { method: "POST" }),
+
+  // ── Лента ───────────────────────────────────────────────────────────
+  ads: (): Promise<Ad[]> => request("/api/ads"),
+
+  updateSellerBlacklist: (sellers: string[]): Promise<{ sellers: string[] }> =>
+    request("/api/seller-blacklist", { method: "POST", body: { sellers } }),
+
+  // ── Сессия Avito (кнопка «Позвонить») ───────────────────────────────
+  avitoSession: (): Promise<AvitoSession> => request("/api/avito/session"),
+
+  // async, чтобы ошибка разбора JSON пришла в .catch() вызывающего, а не
+  // выбросилась синхронно из обработчика клика.
+  importAvitoSession: async (raw: string): Promise<AvitoSession> =>
+    request("/api/avito/session/import", { method: "POST", body: avitoSessionBody(raw) }),
+
+  clearAvitoSession: (): Promise<AvitoSession> =>
+    request("/api/avito/session/clear", { method: "POST" }),
+
+  avitoPhone: (adId: string | number): Promise<AvitoPhoneResult> =>
+    request("/api/avito/phone", { method: "POST", body: { ad_id: String(adId) } }),
+
+  // ── Баланс сервиса cookies ──────────────────────────────────────────
+  resourceBalance: (): Promise<SpfaBalance> => request("/api/resource/balance"),
 };

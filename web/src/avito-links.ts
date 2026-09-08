@@ -1,22 +1,15 @@
 import type { Ad } from "./types";
 
+/**
+ * Ссылка на объявление на Avito.
+ *
+ * Сервер отдаёт готовый путь, но не всегда: если его нет, собираем адрес
+ * по ID — Avito сам развернёт его в полную ссылку.
+ */
 export function itemWebUrl(ad: Ad): string {
-  const id = String(ad.id);
-  if (ad.url && ad.url.includes("avito.ru")) return ad.url.split("?")[0];
-  return `https://www.avito.ru/items/${id}`;
-}
-
-/** Открыть чат Avito по объявлению (в приложении на Android или в браузере). */
-export function openMessenger(ad: Ad): void {
-  const id = String(ad.id);
-  const web = `https://www.avito.ru/profile/messenger?itemId=${id}`;
-  const isAndroid = /Android/i.test(navigator.userAgent);
-  if (isAndroid) {
-    const intent =
-      `intent://www.avito.ru/profile/messenger?itemId=${id}#Intent;scheme=https;package=com.avito.android;` +
-      `S.browser_fallback_url=${encodeURIComponent(web)};end`;
-    window.location.assign(intent);
-    return;
+  if (ad.url && ad.url.includes("avito.ru")) {
+    // Параметры запроса — это метки поиска, в ссылке они не нужны.
+    return ad.url.split("?")[0] ?? ad.url;
   }
-  window.open(web, "_blank", "noopener");
+  return `https://www.avito.ru/items/${String(ad.id)}`;
 }

@@ -1,116 +1,113 @@
 # Сигнал — мониторинг объявлений Avito
 
-Веб-приложение для мониторинга новых объявлений Avito в реальном времени: лента обновляется автоматически, есть фильтры, привязка Avito для кнопки «Позвонить», push-уведомления и Docker-деплой.
+Веб-приложение, которое непрерывно опрашивает Avito и показывает новые
+объявления в реальном времени: лента обновляется сама, есть фильтры по
+категории, региону, моделям iPhone и продавцам, push-уведомления на телефон
+и кнопка «Позвонить» через привязанную сессию Avito.
+
+## Как это работает
+
+Приложение — один процесс Python, который поднимает три вещи:
+
+- **веб-интерфейс** на `127.0.0.1:8765` — статика из `static/` плюс JSON-API;
+- **цикл мониторинга** — опрашивает Avito, но только после того, как в
+  интерфейсе нажали «Начать поиск»;
+- **сервис пула cookies** — держит наборы мобильных cookies рабочими, пока
+  идёт опрос.
+
+Avito отдаёт выдачу только «мобильному» клиенту, поэтому запросы идут через
+мобильный прокси со сменой IP и через пул покупных cookies: сгоревший набор
+уходит на разблокировку, а опрос продолжается на остальных.
+
+Подробнее — [docs/architecture.md](docs/architecture.md).
+
+## Быстрый старт
+
+Нужен Python 3.11+ и (для сборки интерфейса) Node.js 20+.
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate         # Windows
+# source .venv/bin/activate    # Linux/macOS
+pip install -r requirements.txt
+```
+
+Скопируйте оба файла настроек и заполните секреты:
+
+```bash
+copy config.toml.example config.toml   # Windows
+copy .env.example .env
+# cp config.toml.example config.toml   # Linux/macOS
+# cp .env.example .env
+```
+
+| Файл          | Что хранит                                       | В git |
+| ------------- | ------------------------------------------------ | ----- |
+| `.env`        | прокси, ключ сервиса cookies, логин/пароль входа | нет   |
+| `config.toml` | фильтры, интервалы опроса, размер пула           | нет   |
+
+Минимум для запуска — `PROXY_STRING`, `COOKIES_API_KEY`, `APP_LOGIN` и
+`APP_PASSWORD` в `.env`. Все настройки описаны в
+[docs/configuration.md](docs/configuration.md).
+
+Запуск:
+
+```bash
+python -m avito_monitor
+```
+
+Откройте <http://127.0.0.1:8765>, войдите под `APP_LOGIN`/`APP_PASSWORD` и
+нажмите «Начать поиск».
+
+## Docker
+
+```bash
+cp config.toml.example config.toml
+cp .env.example .env    # заполнить секреты
+docker compose up -d --build
+```
+
+Контейнер публикует порт только на `127.0.0.1`: наружу приложение выходит
+через nginx с TLS. Полная процедура, включая домен, сертификат и обновление,
+— в [docs/deployment.md](docs/deployment.md).
 
 ## Структура проекта
 
 ```
-parser1/
-├── parser.py              # Точка входа
-├── settings.py            # Загрузка config.toml + .env
-├── config.toml.example    # Настройки парсера (без секретов)
-├── .env.example           # Секреты и доступы
-├── web/                   # Исходники фронтенда (TypeScript + Vite)
-├── static/                # Собранный фронтенд (для локального запуска)
-├── docker/                # Docker entrypoint
-├── tests/                 # Автотесты
-└── tools/                 # Утилиты для диагностики
+avito_monitor/        Приложение (Python)
+├── avito/            Всё, что знает про Avito: ссылки, разбор выдачи, фильтры
+├── cookies/          Пул мобильных cookies и его обслуживание
+├── monitor/          Цикл опроса, темп опроса, память о показанном
+├── net/              HTTP-клиент и мобильный прокси
+├── web/              Сервер, API, лента, push, прокси картинок
+├── data/             Справочники регионов, категорий и моделей iPhone
+└── tools/            Служебные скрипты (VAPID-ключи, разбор логов)
+
+web/                  Исходники интерфейса (TypeScript + Vite + Tailwind)
+static/               Собранный интерфейс — его и раздаёт сервер
+tests/                Автотесты (pytest + Playwright)
+docker/               Entrypoint контейнера
+deploy/nginx/         Пример конфига nginx
+docs/                 Документация
 ```
 
-## Быстрый старт (локально)
+## Документация
 
-### 1. Зависимости
+| Документ                                       | О чём                                              |
+| ---------------------------------------------- | -------------------------------------------------- |
+| [architecture.md](docs/architecture.md)        | Из чего состоит приложение и как идут данные        |
+| [configuration.md](docs/configuration.md)      | Все настройки `config.toml` и `.env`                |
+| [api.md](docs/api.md)                          | HTTP-API: эндпоинты, форматы, коды ошибок           |
+| [deployment.md](docs/deployment.md)            | Установка на сервер, nginx, HTTPS, обновление       |
+| [operations.md](docs/operations.md)            | Эксплуатация: логи, cookies, прокси, диагностика    |
+| [development.md](docs/development.md)          | Разработка: тесты, линтеры, сборка интерфейса       |
+
+## Тесты и проверки
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate        # Windows
-# source .venv/bin/activate   # Linux/macOS
-pip install -r requirements.txt
+python -m pytest              # автотесты (включая UI в headless-браузере)
+python -m ruff check .        # линтер
+cd web && npm run check       # типы, линтер и формат интерфейса
 ```
 
-### 2. Конфигурация
-
-```bash
-copy config.toml.example config.toml   # Windows
-# cp config.toml.example config.toml   # Linux/macOS
-
-copy .env.example .env
-# Заполните .env: прокси, ключ ресурса, логин/пароль
-```
-
-| Файл | Что хранить |
-|------|-------------|
-| `.env` | Прокси, ключ API, логин/пароль, порт |
-| `config.toml` | Фильтры, интервалы опроса, URL поиска |
-
-### 3. Запуск
-
-```bash
-python parser.py
-```
-
-Откройте http://127.0.0.1:8765
-
-### 4. Сборка фронтенда (при изменении UI)
-
-```bash
-cd web
-npm ci
-npm run build
-```
-
-## Docker
-
-Подробнее — в [DEPLOY.md](DEPLOY.md).
-
-```bash
-cp config.toml.example config.toml
-cp .env.example .env
-# заполните .env
-
-docker compose up -d --build
-```
-
-## Тесты
-
-```bash
-python tests/test_iphone_filter.py
-python tests/test_parser_speed.py
-```
-
-## Переменные окружения (.env)
-
-| Переменная | Описание |
-|---|---|
-| `PROXY_STRING` | HTTP-прокси `user:pass@host:port` |
-| `SOCKS5_PROXY` | SOCKS5-прокси (опционально) |
-| `PROXY_CHANGE_URL` | URL смены IP мобильного прокси |
-| `COOKIES_API_KEY` | Ключ сервиса cookies |
-| `APP_LOGIN` | Логин веб-интерфейса |
-| `APP_PASSWORD` | Пароль веб-интерфейса |
-| `WEB_PORT` | Порт (по умолчанию 8765) |
-| `WEB_HOST` | Адрес bind (0.0.0.0 для сервера) |
-| `WEB_OPEN_BROWSER` | Открывать браузер при старте (1/0) |
-| `SKIP_VPN_BYPASS` | Не настраивать Windows-маршруты VPN (1/0) |
-
-## Push-уведомления (фоновые)
-
-1. На сервере сгенерируйте VAPID-ключи: `python tools/generate_vapid.py` → добавьте в `.env`
-2. Откройте **https://peterparser.ru**, войдите, меню → «Push о новых объявлениях»
-3. **Android Chrome** — push приходят при свёрнутой вкладке
-4. **iPhone** — добавьте сайт «На экран Домой» (Safari → Поделиться), iOS 16.4+
-
-Формат: заголовок **«Сигнал»**, текст — название объявления (или «N новых объявлений · …»).
-
-## Привязка Avito (кнопка «Позвонить»)
-
-1. На Android установите Kiwi Browser и расширение Cookie-Editor
-2. Откройте сайт парсера в Kiwi
-3. Войдите на `m.avito.ru`
-4. Экспортируйте cookies (JSON) и вставьте в меню «Привязка Avito»
-
-## Диагностика
-
-```bash
-python tools/bench_speed.py --log logs/parser.log
-```
+Подробнее — [docs/development.md](docs/development.md).

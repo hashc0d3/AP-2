@@ -1,109 +1,129 @@
+/**
+ * Сохранённые ссылки Avito (режим поиска «по ссылке»).
+ *
+ * Хранятся в localStorage браузера, а не на сервере: это личные закладки
+ * пользователя, и серверу для поиска они не нужны — он получает готовую
+ * ссылку в запросе.
+ *
+ * Функции не меняют переданный список, а возвращают новый и сразу пишут
+ * его на диск: вызывающему достаточно присвоить результат.
+ */
+
+import { asText } from "./parse";
+
 export type SavedUrl = { id: string; name: string; url: string };
 
 const STORAGE_KEY = "parser1.saved-urls";
+
+/** Больше пяти закладок в выпадающий список уже не помещается. */
 export const MAX_SAVED_URLS = 5;
+
+const MAX_NAME_LENGTH = 48;
+
+export type SaveResult = {
+  urls: SavedUrl[];
+  item: SavedUrl;
+  /** Ссылка добавлена как новая (иначе обновлена существующая). */
+  added: boolean;
+  /** Достигнут предел MAX_SAVED_URLS — ничего не сохранено. */
+  limitReached: boolean;
+};
 
 function newId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function normalizeUrl(url: string): string {
-  return url.trim();
+function sameUrl(left: string, right: string): boolean {
+  return left.trim() === right.trim();
 }
 
-export function urlsMatch(a: string, b: string): boolean {
-  return normalizeUrl(a) === normalizeUrl(b);
-}
-
-export function defaultUrlName(url: string, fallbackIndex: number): string {
+/** Название по ссылке: два последних участка пути обычно узнаваемы. */
+function nameFromUrl(url: string, fallbackIndex: number): string {
   try {
-    const u = new URL(url);
-    const parts = u.pathname.split("/").filter(Boolean);
+    const parsed = new URL(url);
+    const parts = parsed.pathname.split("/").filter(Boolean);
     if (parts.length >= 2) {
       const tail = parts.slice(-2).join(" · ");
-      return tail.length > 48 ? `${tail.slice(0, 47)}…` : tail;
+      return tail.length > MAX_NAME_LENGTH ? `${tail.slice(0, MAX_NAME_LENGTH - 1)}…` : tail;
     }
-    if (parts.length === 1) return parts[0];
-    return u.hostname.replace(/^www\./, "");
+    return parts[0] || parsed.hostname.replace(/^www\./, "");
   } catch {
     return `Ссылка ${fallbackIndex + 1}`;
   }
 }
 
-export function loadSavedUrls(): SavedUrl[] {
+function read(): SavedUrl[] {
   try {
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]") as unknown;
     if (!Array.isArray(raw)) return [];
     return raw
-      .map((item) => {
-        if (!item || typeof item !== "object") return null;
-        const rec = item as Record<string, unknown>;
-        const url = normalizeUrl(String(rec.url || ""));
-        if (!url) return null;
-        return {
-          id: String(rec.id || newId()),
-          name: String(rec.name || defaultUrlName(url, 0)).trim() || defaultUrlName(url, 0),
-          url,
-        } satisfies SavedUrl;
-      })
-      .filter((item): item is SavedUrl => Boolean(item))
+      .map(toSavedUrl)
+      .filter((item): item is SavedUrl => item !== null)
       .slice(0, MAX_SAVED_URLS);
   } catch {
     return [];
   }
 }
 
-export function saveSavedUrls(urls: SavedUrl[]): void {
+function toSavedUrl(raw: unknown): SavedUrl | null {
+  if (!raw || typeof raw !== "object") return null;
+  const fields = raw as Record<string, unknown>;
+  const url = asText(fields.url);
+  if (!url) return null;
+  return {
+    id: asText(fields.id) || newId(),
+    name: asText(fields.name) || nameFromUrl(url, 0),
+    url,
+  };
+}
+
+function write(urls: SavedUrl[]): SavedUrl[] {
+  const capped = urls.slice(0, MAX_SAVED_URLS);
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(urls.slice(0, MAX_SAVED_URLS)));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(capped));
   } catch {
-    /* empty */
+    // Приватный режим запрещает запись — закладки просто не сохранятся.
   }
+  return capped;
 }
 
 export function findSavedUrlByUrl(urls: SavedUrl[], url: string): SavedUrl | undefined {
-  return urls.find((item) => urlsMatch(item.url, url));
+  return urls.find((item) => sameUrl(item.url, url));
 }
 
-export type UpsertResult = {
-  urls: SavedUrl[];
-  item: SavedUrl;
-  added: boolean;
-  limitReached: boolean;
-};
-
-export function addSavedUrl(urls: SavedUrl[], name: string, url: string): UpsertResult {
-  const normalized = normalizeUrl(url);
+/** Добавить ссылку или обновить название уже сохранённой. */
+export function addSavedUrl(urls: SavedUrl[], name: string, url: string): SaveResult {
+  const trimmedUrl = url.trim();
   const trimmedName = name.trim();
-  if (!normalized || !trimmedName) {
-    return {
-      urls,
-      item: { id: "", name: trimmedName, url: normalized },
-      added: false,
-      limitReached: false,
-    };
-  }
-  const existing = findSavedUrlByUrl(urls, normalized);
+  const rejected = (limitReached: boolean): SaveResult => ({
+    urls,
+    item: { id: "", name: trimmedName, url: trimmedUrl },
+    added: false,
+    limitReached,
+  });
+
+  if (!trimmedUrl || !trimmedName) return rejected(false);
+
+  const existing = findSavedUrlByUrl(urls, trimmedUrl);
   if (existing) {
-    const item = { ...existing, name: trimmedName, url: normalized };
-    const next = urls.map((entry) => (entry.id === existing.id ? item : entry));
-    saveSavedUrls(next);
+    const item = { ...existing, name: trimmedName, url: trimmedUrl };
+    const next = write(urls.map((entry) => (entry.id === existing.id ? item : entry)));
     return { urls: next, item, added: false, limitReached: false };
   }
-  if (urls.length >= MAX_SAVED_URLS) {
-    return {
-      urls,
-      item: { id: "", name: trimmedName, url: normalized },
-      added: false,
-      limitReached: true,
-    };
-  }
-  const item: SavedUrl = { id: newId(), name: trimmedName, url: normalized };
-  const next = [item, ...urls].slice(0, MAX_SAVED_URLS);
-  saveSavedUrls(next);
-  return { urls: next, item, added: true, limitReached: false };
+
+  if (urls.length >= MAX_SAVED_URLS) return rejected(true);
+
+  const item: SavedUrl = { id: newId(), name: trimmedName, url: trimmedUrl };
+  return { urls: write([item, ...urls]), item, added: true, limitReached: false };
 }
 
+/**
+ * Правка названия и ссылки из списка закладок.
+ *
+ * Возвращает тот же массив, если менять нечего: пустое поле или такая
+ * ссылка уже есть под другим названием. Вызывающий сравнивает по ссылке и
+ * понимает, что перерисовывать список не нужно.
+ */
 export function updateSavedUrl(
   urls: SavedUrl[],
   id: string,
@@ -111,63 +131,27 @@ export function updateSavedUrl(
   url: string,
 ): SavedUrl[] {
   const trimmedName = name.trim();
-  const normalized = normalizeUrl(url);
-  if (!trimmedName || !normalized) return urls;
-  const duplicate = urls.find((item) => item.id !== id && urlsMatch(item.url, normalized));
-  if (duplicate) return urls;
-  const next = urls.map((item) => (
-    item.id === id ? { ...item, name: trimmedName, url: normalized } : item
-  ));
-  saveSavedUrls(next);
-  return next;
-}
-
-export function upsertSavedUrl(urls: SavedUrl[], url: string, name?: string): UpsertResult {
-  const normalized = normalizeUrl(url);
-  const existing = findSavedUrlByUrl(urls, normalized);
-  if (existing) {
-    const item = { ...existing, name: name?.trim() || existing.name, url: normalized };
-    const next = urls.map((entry) => (entry.id === existing.id ? item : entry));
-    saveSavedUrls(next);
-    return { urls: next, item, added: false, limitReached: false };
-  }
-  if (urls.length >= MAX_SAVED_URLS) {
-    return {
-      urls,
-      item: { id: "", name: "", url: normalized },
-      added: false,
-      limitReached: true,
-    };
-  }
-  const item: SavedUrl = {
-    id: newId(),
-    name: name?.trim() || defaultUrlName(normalized, urls.length),
-    url: normalized,
-  };
-  const next = [item, ...urls].slice(0, MAX_SAVED_URLS);
-  saveSavedUrls(next);
-  return { urls: next, item, added: true, limitReached: false };
+  const trimmedUrl = url.trim();
+  if (!trimmedName || !trimmedUrl) return urls;
+  if (urls.some((item) => item.id !== id && sameUrl(item.url, trimmedUrl))) return urls;
+  return write(
+    urls.map((item) => (item.id === id ? { ...item, name: trimmedName, url: trimmedUrl } : item)),
+  );
 }
 
 export function removeSavedUrl(urls: SavedUrl[], id: string): SavedUrl[] {
-  const next = urls.filter((item) => item.id !== id);
-  saveSavedUrls(next);
-  return next;
+  return write(urls.filter((item) => item.id !== id));
 }
 
-export function renameSavedUrl(urls: SavedUrl[], id: string, name: string): SavedUrl[] {
-  const trimmed = name.trim();
-  if (!trimmed) return urls;
-  const next = urls.map((item) => (item.id === id ? { ...item, name: trimmed } : item));
-  saveSavedUrls(next);
-  return next;
-}
-
-export function migrateLegacySavedUrl(savedSearchUrl: string): SavedUrl[] {
-  const urls = loadSavedUrls();
-  const legacy = normalizeUrl(savedSearchUrl);
+/**
+ * Перенос единственной ссылки из старого формата настроек.
+ *
+ * До появления списка закладок ссылка хранилась одним полем `savedSearchUrl`
+ * в настройках поиска. Переносим её, только если список ещё пуст.
+ */
+export function migrateLegacySavedUrl(legacyUrl: string): SavedUrl[] {
+  const urls = read();
+  const legacy = legacyUrl.trim();
   if (!legacy || urls.length) return urls;
-  const next = [{ id: newId(), name: defaultUrlName(legacy, 0), url: legacy }];
-  saveSavedUrls(next);
-  return next;
+  return write([{ id: newId(), name: nameFromUrl(legacy, 0), url: legacy }]);
 }

@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import socket
 from collections.abc import Iterator
 from dataclasses import replace
 
@@ -15,6 +16,7 @@ import requests
 
 from avito_monitor import auth, spfa
 from avito_monitor.config import Settings
+from avito_monitor.web import server as server_module
 from avito_monitor.web.feed import AdFeed
 from avito_monitor.web.server import QuietServer, start_server
 
@@ -156,6 +158,38 @@ def test_open_endpoints_work_without_login(
 
 def test_unknown_endpoint_gives_404(client: requests.Session, base_url: str) -> None:
     assert client.get(f"{base_url}/api/нет-такого", timeout=5).status_code == 404
+
+
+def test_body_on_get_does_not_break_the_answer(client: requests.Session, base_url: str) -> None:
+    """Тело у GET встречается редко, но ответ должно доходить.
+
+    Непрочитанное сервером тело оставалось в сокете, и закрытие соединения
+    превращалось в сброс: клиент терял уже отправленный ответ.
+    """
+    for _ in range(5):
+        response = client.request("GET", f"{base_url}/events", json={"x": "y"}, timeout=5)
+        assert response.status_code == 403
+
+
+def test_huge_body_is_refused(base_url: str) -> None:
+    """Заявленный Content-Length не должен заставлять сервер выделять память.
+
+    Запрос отправляется сокетом: ``requests`` считает ``Content-Length`` сам
+    и подделать его не даёт.
+    """
+    host, port = base_url.removeprefix("http://").split(":")
+    request = (
+        "POST /api/auth/login HTTP/1.1\r\n"
+        f"Host: {host}:{port}\r\n"
+        f"Content-Length: {server_module.MAX_BODY_BYTES + 1}\r\n"
+        "\r\n"
+    ).encode("ascii")
+
+    with socket.create_connection((host, int(port)), timeout=5) as sock:
+        sock.sendall(request)
+        answer = sock.recv(4096)
+
+    assert b"413" in answer.split(b"\r\n", 1)[0]
 
 
 def test_vapid_never_exposes_private_key(client: requests.Session, base_url: str) -> None:

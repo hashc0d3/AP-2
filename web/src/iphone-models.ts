@@ -1,3 +1,5 @@
+import { asText } from "./parse";
+
 export type IphoneModelOption = {
   id: string;
   gen: number;
@@ -63,7 +65,7 @@ function rawToId(raw: unknown): string | null {
     const id = String(raw);
     return VALID_IDS.has(id) ? id : null;
   }
-  const text = String(raw || "").trim().toLowerCase();
+  const text = asText(raw).toLowerCase();
   if (!text) return null;
   if (VALID_IDS.has(text)) return text;
   if (LEGACY_GEN_IDS.has(text)) return null;
@@ -81,10 +83,11 @@ export function normalizeIphoneModels(values: unknown, options: NormalizeOptions
   const out: string[] = [];
   const seen = new Set<string>();
   for (const raw of values) {
-    const text = String(raw || "").trim().toLowerCase();
-    const candidates = expandLegacyGens && /^\d+$/.test(text)
-      ? expandLegacyId(text)
-      : ([rawToId(raw)].filter(Boolean) as string[]);
+    const text = asText(raw).toLowerCase();
+    const candidates =
+      expandLegacyGens && /^\d+$/.test(text)
+        ? expandLegacyId(text)
+        : ([rawToId(raw)].filter(Boolean) as string[]);
     for (const id of candidates) {
       if (!VALID_IDS.has(id) || seen.has(id)) continue;
       seen.add(id);
@@ -152,12 +155,30 @@ export function iphoneModelsToPayload(models: string[]): string[] {
   return normalized.length ? normalized : [...DEFAULT_IPHONE_MODELS];
 }
 
+/** Подпись выбора моделей на кнопке фильтра. */
 export function iphoneModelsSummary(models: string[]): string {
   const normalized = normalizeIphoneModels(models, { allowEmpty: true });
   if (!normalized.length) return "Не выбрано";
   if (isDefaultIphoneSelection(normalized)) return "Все модели";
-  if (normalized.length === 1) {
-    return IPHONE_MODELS.find((item) => item.id === normalized[0])?.label || normalized[0];
+  const single = normalized.length === 1 ? normalized[0] : null;
+  if (single) {
+    return IPHONE_MODELS.find((item) => item.id === single)?.label ?? single;
   }
-  return `${normalized.length} модели`;
+  return `${normalized.length} ${pluralModels(normalized.length)}`;
+}
+
+/** «1 модель», «2 модели», «5 моделей». */
+function pluralModels(count: number): string {
+  const tail = count % 100;
+  if (tail >= 11 && tail <= 14) return "моделей";
+  switch (count % 10) {
+    case 1:
+      return "модель";
+    case 2:
+    case 3:
+    case 4:
+      return "модели";
+    default:
+      return "моделей";
+  }
 }

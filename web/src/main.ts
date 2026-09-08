@@ -41,8 +41,8 @@ const authPassword = document.getElementById("auth-password") as HTMLInputElemen
 const authSubmit = document.getElementById("auth-submit") as HTMLButtonElement;
 const authHint = document.getElementById("auth-hint") as HTMLElement;
 const authBtn = document.getElementById("auth-btn") as HTMLButtonElement;
-  const shellUser = document.getElementById("shell-user") as HTMLElement;
-  const shellAppTools = document.getElementById("shell-app-tools") as HTMLElement;
+const shellUser = document.getElementById("shell-user") as HTMLElement;
+const shellAppTools = document.getElementById("shell-app-tools") as HTMLElement;
 
 function showAuth(): void {
   document.body.classList.add("auth-gate");
@@ -70,7 +70,8 @@ function showApp(username: string): void {
 authSubmit.addEventListener("click", () => {
   authSubmit.disabled = true;
   authHint.textContent = "";
-  void api.login(authLogin.value, authPassword.value)
+  void api
+    .login(authLogin.value, authPassword.value)
     .then((status) => showApp(status.username || "admin"))
     .catch((err) => {
       authHint.textContent = err instanceof Error ? err.message : String(err);
@@ -89,10 +90,13 @@ document.getElementById("auth-form")?.addEventListener("submit", (ev) => {
   authSubmit.click();
 });
 
-void api.authStatus().then((status) => {
-  if (status.logged_in) {
-    showApp(status.username || "admin");
-  } else {
-    showAuth();
-  }
-}).catch(() => showAuth());
+void api
+  .authStatus()
+  .then((status) => {
+    if (status.logged_in) {
+      showApp(status.username || "admin");
+    } else {
+      showAuth();
+    }
+  })
+  .catch(() => showAuth());

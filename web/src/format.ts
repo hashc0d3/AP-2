@@ -1,45 +1,55 @@
+/** Подготовка текста и ссылок к выводу в карточке. */
+
+const HTML_ESCAPES: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
+};
+
+/**
+ * Экранирование для вставки в HTML.
+ *
+ * Карточки собираются как строки и присваиваются через innerHTML, поэтому
+ * любые данные объявления — название, имя продавца, описание — обязаны
+ * пройти через эту функцию.
+ */
 export function escapeHtml(text: string): string {
-  return text.replace(/[&<>"']/g, (ch) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;",
-  }[ch] || ch));
+  return text.replace(/[&<>"']/g, (char) => HTML_ESCAPES[char] || char);
 }
 
-/** Одна строка для свёрнутого описания (Safari/iOS не режет текст с переносами). */
+/**
+ * Описание в одну строку для свёрнутой карточки.
+ *
+ * Safari на iOS не обрезает многострочный текст по `line-clamp`, поэтому
+ * переносы убираем заранее.
+ */
 export function collapseDescText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+/** Avito разделяет разряды неразрывными пробелами разной ширины. */
 export function displayPrice(price: string): string {
   return price.replace(/[\u00a0\u202f\u2009]/g, " ").trim();
 }
 
-export function formatLeft(seconds: number): string {
-  const s = Math.max(0, Math.floor(seconds));
-  const days = Math.floor(s / 86400);
-  const hours = Math.floor((s % 86400) / 3600);
-  const mins = Math.floor((s % 3600) / 60);
-  if (days > 0) return `${days} дн. ${hours} ч`;
-  if (hours > 0) return `${hours} ч ${mins} мин`;
-  return `${mins} мин`;
-}
-
 function formatAge(seconds: number): string {
-  const s = Math.max(0, Math.floor(seconds));
-  if (s < 60) return `${s} сек назад`;
-  const minutes = Math.floor(s / 60);
+  const total = Math.max(0, Math.floor(seconds));
+  if (total < 60) return `${total} сек назад`;
+  const minutes = Math.floor(total / 60);
   if (minutes < 60) return `${minutes} мин назад`;
   return `${Math.floor(minutes / 60)} ч назад`;
 }
 
+/**
+ * Время публикации: часы по времени выбранного региона плюс «сколько назад».
+ *
+ * Часовой пояс приходит извне, а не берётся из браузера: пользователь может
+ * следить за объявлениями Владивостока, сидя в Москве.
+ */
 export function formatAddedAt(ts: number, timeZone: string): string {
   const addedMs = ts * 1000;
-  const nowMs = Date.now();
-  const seconds = Math.max(0, Math.floor((nowMs - addedMs) / 1000));
-  const age = formatAge(seconds);
   const clock = new Intl.DateTimeFormat("ru-RU", {
     timeZone,
     hour: "2-digit",
@@ -47,24 +57,20 @@ export function formatAddedAt(ts: number, timeZone: string): string {
     second: "2-digit",
     hour12: false,
   }).format(addedMs);
-  if (age) return `${clock} · ${age}`;
-  return new Intl.DateTimeFormat("ru-RU", {
-    timeZone,
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(addedMs);
+  return `${clock} · ${formatAge((Date.now() - addedMs) / 1000)}`;
 }
 
+/**
+ * Ссылка на картинку через свой прокси.
+ *
+ * Avito отдаёт изображения только со своим `Referer`, поэтому напрямую из
+ * браузера они не загружаются (см. avito_monitor/web/images.py).
+ */
 export function imgSrc(url: string): string {
-  return "/img?u=" + encodeURIComponent(url);
+  return `/img?u=${encodeURIComponent(url)}`;
 }
 
-/** Avito CDN: поддомен — условный размер; 128 — максимальное качество. */
+/** То же, но в максимальном качестве: у Avito размер задаётся поддоменом. */
 export function imgSrcLarge(url: string): string {
-  const large = url.replace(/^https:\/\/(\d+)\.img\.avito\.st\//, "https://128.img.avito.st/");
-  return imgSrc(large);
+  return imgSrc(url.replace(/^https:\/\/(\d+)\.img\.avito\.st\//, "https://128.img.avito.st/"));
 }

@@ -1,6 +1,20 @@
 import { api } from "./api";
 import { isLightTheme, setLightTheme } from "./theme";
-import { canUsePush, disableWebPush, enableWebPush, hasNotificationApi, initPushServiceWorker, isWebPushSubscribed, pushBlockReason, pushEnableHint, pushPermission, pushStatusLine, pwaInstallHint, showTestNotification, subscribeWebPush } from "./push-notify";
+import {
+  canUsePush,
+  disableWebPush,
+  enableWebPush,
+  hasNotificationApi,
+  initPushServiceWorker,
+  isWebPushSubscribed,
+  pushBlockReason,
+  pushEnableHint,
+  pushPermission,
+  pushStatusLine,
+  pwaInstallHint,
+  showTestNotification,
+  subscribeWebPush,
+} from "./push-notify";
 import {
   addSellerToBlacklist,
   BLACKLIST_EVENT,
@@ -64,8 +78,12 @@ export function mountUserMenu(opts: UserMenuOptions): {
   const themePill = document.getElementById("theme-toggle-pill") as HTMLElement;
   const themeIconSun = themeBtn.querySelector(".theme-icon-sun") as SVGElement;
   const themeIconMoon = themeBtn.querySelector(".theme-icon-moon") as SVGElement;
-  const resourceBalanceHint = document.getElementById("user-menu-resource-balance-hint") as HTMLElement;
-  const resourceBalanceValue = document.getElementById("user-menu-resource-balance-value") as HTMLElement;
+  const resourceBalanceHint = document.getElementById(
+    "user-menu-resource-balance-hint",
+  ) as HTMLElement;
+  const resourceBalanceValue = document.getElementById(
+    "user-menu-resource-balance-value",
+  ) as HTMLElement;
   const tabSettings = document.getElementById("user-tab-settings") as HTMLButtonElement;
   const tabBlacklist = document.getElementById("user-tab-blacklist") as HTMLButtonElement;
   const panelSettings = document.getElementById("user-panel-settings") as HTMLElement;
@@ -106,16 +124,19 @@ export function mountUserMenu(opts: UserMenuOptions): {
   const renderBlacklist = () => {
     const items = loadSellerBlacklist();
     blacklistEmpty.classList.toggle("hidden", items.length > 0);
-    blacklistList.innerHTML = items.map((seller) => (
-      `<li class="blacklist-item">
+    blacklistList.innerHTML = items
+      .map(
+        (seller) =>
+          `<li class="blacklist-item">
         <span class="blacklist-item-name">${escapeHtml(seller)}</span>
         <button type="button" class="blacklist-item-remove" data-seller="${escapeHtml(seller)}" aria-label="Удалить из чёрного списка" title="Удалить">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path d="M6 6l12 12M18 6L6 18"></path>
           </svg>
         </button>
-      </li>`
-    )).join("");
+      </li>`,
+      )
+      .join("");
   };
 
   const setDrawerTab = (tab: "settings" | "blacklist") => {
@@ -264,9 +285,7 @@ export function mountUserMenu(opts: UserMenuOptions): {
   const setAvitoStatus = (connected: boolean, label = "") => {
     avitoBtn.classList.toggle("on", connected);
     avitoBtn.classList.toggle("off", !connected);
-    avitoStatus.textContent = connected
-      ? `Подключён${label ? ` · ${label}` : ""}`
-      : "Не подключён";
+    avitoStatus.textContent = connected ? `Подключён${label ? ` · ${label}` : ""}` : "Не подключён";
     avitoBadge.textContent = connected ? "ON" : "OFF";
     avitoBadge.classList.toggle("on", connected);
     avitoBadge.classList.toggle("off", !connected);
@@ -286,15 +305,15 @@ export function mountUserMenu(opts: UserMenuOptions): {
     opts.onAvitoClick();
   });
 
-  pushCheck.addEventListener("change", async () => {
+  pushCheck.addEventListener("change", () => {
     if (!pushCheck.checked) {
       savePush(false);
-      await disableWebPush();
-      syncPushUi();
+      void disableWebPush().then(syncPushUi);
       return;
     }
-    const ok = await enablePush();
-    if (!ok) pushCheck.checked = false;
+    void enablePush().then((ok) => {
+      if (!ok) pushCheck.checked = false;
+    });
   });
 
   pushRequestBtn.addEventListener("click", () => {
@@ -332,7 +351,7 @@ export function mountUserMenu(opts: UserMenuOptions): {
   });
 
   blacklistList.addEventListener("click", (ev) => {
-    const btn = (ev.target as HTMLElement).closest("button[data-seller]") as HTMLButtonElement | null;
+    const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>("button[data-seller]");
     if (!btn) return;
     const seller = btn.dataset.seller || "";
     if (!seller) return;
