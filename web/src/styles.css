@@ -256,10 +256,11 @@ html[data-theme="light"] .toast {
   .site-header {
     position: static;
     z-index: auto;
-    width: 100%;
+    width: auto;
     max-width: 100%;
+    margin: max(0.75rem, env(safe-area-inset-top)) 0.75rem 0;
     border-bottom: none;
-    border-radius: 0 0 1.5rem 1.5rem;
+    border-radius: 1.5rem;
     overflow: hidden;
     background: color-mix(in srgb, var(--color-surface) 92%, var(--color-ink));
     backdrop-filter: blur(12px);

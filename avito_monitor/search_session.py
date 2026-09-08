@@ -206,6 +206,7 @@ def start_search(
             plan.web_url,
             region_slug=plan.region.slug,
             category_id=plan.category.id if plan.category else "",
+            query=plan.query,
         )
 
     logger.info(f"Web URL: {plan.web_url}")

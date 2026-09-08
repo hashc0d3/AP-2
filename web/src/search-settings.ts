@@ -20,6 +20,8 @@ export type SearchSettings = {
   searchMode: SearchMode | null;
   selectedSavedUrlId: string | null;
   hideImages: boolean;
+  /** Текст поиска для категории «Все категории». */
+  query: string;
   /** Единственная ссылка из формата до появления списка закладок. */
   legacySavedUrl: string;
 };
@@ -30,6 +32,7 @@ const EMPTY: SearchSettings = {
   searchMode: null,
   selectedSavedUrlId: null,
   hideImages: false,
+  query: "",
   legacySavedUrl: "",
 };
 
@@ -44,6 +47,7 @@ export function loadSearchSettings(): SearchSettings {
       searchMode: toSearchMode(fields.searchMode),
       selectedSavedUrlId: asText(fields.selectedSavedUrlId) || null,
       hideImages: fields.hideImages === true,
+      query: asText(fields.query),
       legacySavedUrl: asText(fields.savedSearchUrl),
     };
   } catch {
@@ -57,6 +61,7 @@ export function saveSearchSettings(settings: {
   searchMode: SearchMode;
   selectedSavedUrlId: string | null;
   hideImages: boolean;
+  query: string;
 }): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));

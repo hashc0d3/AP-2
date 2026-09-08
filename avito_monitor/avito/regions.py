@@ -16,8 +16,9 @@ DATA_PATH = DATA_DIR / "regions.json"
 DEFAULT_TIMEZONE = "Europe/Moscow"
 SEARCH_LIMIT = 20
 
-# В путях Avito slug региона иногда шире, чем в нашем списке.
-_WEB_SLUG_OVERRIDES = {"moskva": "moskva_i_mo"}
+# В списке выбора эти регионы всегда сверху: это разные выдачи Avito,
+# и их чаще всего путают, если «Москва» стоит одной строкой.
+_PINNED_SLUGS = ("moskva_i_mo", "moskva")
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,8 +84,23 @@ def region_timezone(slug: str) -> str:
 
 def web_slug(slug: str) -> str:
     """Slug для пути веб-поиска Avito."""
-    key = (slug or "").strip().strip("/") or default_region().slug
-    return _WEB_SLUG_OVERRIDES.get(key, key)
+    return (slug or "").strip().strip("/") or default_region().slug
+
+
+def _pin_rank(slug: str) -> int:
+    """Порядок закреплённых регионов; остальные — после них."""
+    try:
+        return _PINNED_SLUGS.index(slug)
+    except ValueError:
+        return len(_PINNED_SLUGS)
+
+
+def _ordered_for_picker() -> list[Region]:
+    """Список для пустого поля: сначала Москва и МО, затем Москва, затем остальные."""
+    pinned = {slug: region for slug, region in _by_slug().items() if slug in _PINNED_SLUGS}
+    head = [pinned[slug] for slug in _PINNED_SLUGS if slug in pinned]
+    tail = [region for region in _regions() if region.slug not in _PINNED_SLUGS]
+    return [*head, *tail]
 
 
 def _normalized(text: str) -> str:
@@ -99,9 +115,9 @@ def search_regions(query: str, limit: int = SEARCH_LIMIT) -> list[dict[str, str]
     """
     needle = _normalized((query or "").strip())
     if not needle:
-        return [region.as_dict() for region in _regions()[:limit]]
+        return [region.as_dict() for region in _ordered_for_picker()[:limit]]
 
-    ranked: list[tuple[int, str, Region]] = []
+    ranked: list[tuple[int, int, str, Region]] = []
     for region in _regions():
         name = _normalized(region.name)
         if name.startswith(needle):
@@ -112,6 +128,6 @@ def search_regions(query: str, limit: int = SEARCH_LIMIT) -> list[dict[str, str]
             rank = 2
         else:
             continue
-        ranked.append((rank, name, region))
-    ranked.sort(key=lambda row: (row[0], row[1]))
-    return [region.as_dict() for _, _, region in ranked[:limit]]
+        ranked.append((_pin_rank(region.slug), rank, name, region))
+    ranked.sort()
+    return [region.as_dict() for _, _, _, region in ranked[:limit]]

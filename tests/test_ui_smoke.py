@@ -216,6 +216,22 @@ def test_iphone_selection_can_be_cleared_and_restored(ui: Ui) -> None:
     assert ui.errors() == []
 
 
+def test_all_categories_shows_query_field(ui: Ui) -> None:
+    """В «Все категории» появляется поле запроса; без текста поиск не стартует."""
+    ui.sign_in()
+    ui.open_search_form()
+    assert not ui.page.is_visible("#query")
+
+    ui.page.click("#category-trigger")
+    ui.page.click('#cats button[data-id="all"]')
+    ui.page.wait_for_selector("#query", state="visible", timeout=5000)
+    ui.page.click("#start")
+    ui.page.wait_for_selector(".toast", timeout=5000)
+    assert "запрос" in ui.page.inner_text(".toast").lower()
+    assert ui.page.is_visible("#search-status-pill.is-idle")
+    assert ui.errors() == []
+
+
 def test_url_mode_shows_link_field(ui: Ui) -> None:
     """В режиме «по ссылке» появляется поле ввода, в обычном оно скрыто."""
     ui.sign_in()

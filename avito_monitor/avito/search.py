@@ -59,17 +59,20 @@ def plan_search(
     """
     region = region_or_default(region_slug)
     category = catalog.find_category(category_id)
+    text = (query or "").strip()
+    if category.id == catalog.ALL_CATEGORY_ID and not text:
+        raise ValueError("Укажите поисковый запрос")
 
     models: tuple[str, ...] | None = None
     if iphone_models is not None and category.id == catalog.IPHONE_CATEGORY_ID:
         models = iphone.normalize_models(iphone_models)
 
-    web_url = catalog.build_web_url(query, region.slug, category.id)
+    web_url = catalog.build_web_url(text, region.slug, category.id)
     if models is not None:
         web_url, _ = iphone_params.append_model_params(web_url, models)
 
     return SearchPlan(
-        query=(query or "").strip(),
+        query=text,
         region=region,
         category=category,
         web_url=web_url,
@@ -90,13 +93,15 @@ def plan_from_url(web_url: str) -> SearchPlan:
     )
 
 
-def resolve_api_url(web_url: str, *, region_slug: str = "", category_id: str = "") -> str:
+def resolve_api_url(
+    web_url: str, *, region_slug: str = "", category_id: str = "", query: str = ""
+) -> str:
     """Адрес JSON API для ссылки веб-поиска.
 
     :raises spfa.SpfaError: локально собрать не удалось и сервис не ответил.
     """
     if category_id:
-        local = catalog.build_api_url(region_slug, category_id)
+        local = catalog.build_api_url(region_slug, category_id, query=query)
         if local:
             logger.info("API URL собран локально, без обращения к сервису")
             return local

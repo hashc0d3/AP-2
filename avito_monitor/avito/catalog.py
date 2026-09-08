@@ -25,6 +25,9 @@ WEB_BASE_URL = "https://www.avito.ru"
 IPHONE_CATEGORY_ID = "apple_phones"
 """Единственная категория, для которой работает фильтр моделей iPhone."""
 
+ALL_CATEGORY_ID = "all"
+"""Поиск по тексту во всех категориях: без пути и без categoryId."""
+
 NO_CATEGORY = {"id": "none", "name": "Без категории"}
 """Заглушка для поиска по готовой ссылке — категорию там задаёт пользователь."""
 
@@ -32,7 +35,7 @@ NO_CATEGORY = {"id": "none", "name": "Без категории"}
 # узнаём из ответов внешнего сервиса и запоминаем, чтобы больше не спрашивать.
 _KNOWN_LOCATION_IDS = {
     "all": "621540",
-    "moskva": "107620",
+    "moskva": "637640",
     "moskva_i_mo": "107620",
     "moskovskaya_oblast": "637680",
     "sankt-peterburg": "653240",
@@ -57,6 +60,14 @@ class Category:
     def as_dict(self) -> dict[str, str]:
         """Вид для API веб-интерфейса."""
         return {"id": self.id, "name": self.name}
+
+
+ALL_CATEGORY = Category(
+    id=ALL_CATEGORY_ID,
+    name="Все категории",
+    path="",
+    api_category_id="",
+)
 
 
 @lru_cache(maxsize=1)
@@ -86,7 +97,7 @@ def all_categories() -> tuple[Category, ...]:
 
 def list_categories() -> list[dict[str, str]]:
     """Категории для выпадающего списка в интерфейсе."""
-    return [item.as_dict() for item in _categories()]
+    return [ALL_CATEGORY.as_dict(), *[item.as_dict() for item in _categories()]]
 
 
 def default_category() -> Category:
@@ -101,6 +112,8 @@ def find_category(category_id: str) -> Category:
     key = (category_id or "").strip().lower()
     if not key:
         return default_category()
+    if key == ALL_CATEGORY_ID:
+        return ALL_CATEGORY
     category = _by_id().get(key)
     if category is None:
         raise ValueError(f"Неизвестная категория: {category_id}")
@@ -167,7 +180,7 @@ def build_web_url(query: str, region_slug: str, category_id: str = "") -> str:
     return f"{WEB_BASE_URL}/{path}?{'&'.join(params)}"
 
 
-def build_api_url(region_slug: str, category_id: str) -> str | None:
+def build_api_url(region_slug: str, category_id: str, *, query: str = "") -> str | None:
     """Адрес JSON API, собранный локально.
 
     ``None`` — для этого региона ещё не известен ``locationId``, придётся
@@ -183,17 +196,24 @@ def build_api_url(region_slug: str, category_id: str) -> str | None:
     if not location_id:
         return None
 
-    query: list[tuple[str, str]] = [
-        ("categoryId", category.api_category_id),
-        ("localPriority", "0"),
-        ("locationId", location_id),
-        ("owner[0]", "private"),
-        ("presentationType", "serp"),
-        ("privateOnly", "1"),
-        ("sort", "date"),
-    ]
-    query.extend((f"params[{key}]", value) for key, value in category.api_params)
-    return f"{ITEMS_API_URL}?{urlencode(query)}"
+    params: list[tuple[str, str]] = []
+    text = (query or "").strip()
+    if text:
+        params.append(("q", text))
+    if category.api_category_id:
+        params.append(("categoryId", category.api_category_id))
+    params.extend(
+        (
+            ("localPriority", "0"),
+            ("locationId", location_id),
+            ("owner[0]", "private"),
+            ("presentationType", "serp"),
+            ("privateOnly", "1"),
+            ("sort", "date"),
+        )
+    )
+    params.extend((f"params[{key}]", value) for key, value in category.api_params)
+    return f"{ITEMS_API_URL}?{urlencode(params)}"
 
 
 def with_page(api_url: str, page: int) -> str:

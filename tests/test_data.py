@@ -67,6 +67,19 @@ def test_region_search_finds_by_prefix() -> None:
     assert any(item["slug"] == "novosibirsk" for item in found)
 
 
+def test_region_picker_starts_with_moscow_variants() -> None:
+    """В списке без запроса сначала широкая Москва, затем город."""
+    found = regions.search_regions("")
+    assert [item["slug"] for item in found[:2]] == ["moskva_i_mo", "moskva"]
+    assert found[0]["name"] == "Москва и Московская область"
+    assert found[1]["name"] == "Москва"
+
+
+def test_moscow_search_keeps_pinned_order() -> None:
+    slugs = [item["slug"] for item in regions.search_regions("моск")]
+    assert slugs.index("moskva_i_mo") < slugs.index("moskva")
+
+
 def test_region_search_ignores_case_and_spaces() -> None:
     assert regions.search_regions("  КАЗАНЬ  ") == regions.search_regions("казань")
 
@@ -89,6 +102,12 @@ def test_categories_data_is_well_formed() -> None:
 def test_category_ids_are_unique() -> None:
     ids = [item["id"] for item in catalog.list_categories()]
     assert len(ids) == len(set(ids))
+
+
+def test_all_categories_is_first_in_the_list() -> None:
+    items = catalog.list_categories()
+    assert items[0]["id"] == catalog.ALL_CATEGORY_ID
+    assert items[0]["name"] == "Все категории"
 
 
 def test_iphone_category_is_present() -> None:

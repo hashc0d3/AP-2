@@ -235,6 +235,37 @@ def test_start_search_requires_known_region(signed_in: requests.Session, base_ur
     assert "регион" in response.json()["error"].lower()
 
 
+def test_start_search_all_categories_requires_query(
+    signed_in: requests.Session, base_url: str
+) -> None:
+    response = signed_in.post(
+        f"{base_url}/api/search",
+        json={"region": "moskva", "category": "all"},
+        timeout=10,
+    )
+    assert response.status_code == 400
+    assert "запрос" in response.json()["error"].lower()
+
+
+def test_start_search_all_categories_builds_links(
+    signed_in: requests.Session, base_url: str
+) -> None:
+    response = signed_in.post(
+        f"{base_url}/api/search",
+        json={"query": "iphone", "region": "moskva", "category": "all"},
+        timeout=10,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    web_url = payload["web_url"]
+    path = web_url.split("?", 1)[0]
+    assert "q=iphone" in web_url
+    assert "s=104" in web_url
+    assert "owner" in web_url
+    assert "/telefony" not in path
+    signed_in.post(f"{base_url}/api/search/stop", timeout=5)
+
+
 def test_start_search_returns_links(signed_in: requests.Session, base_url: str) -> None:
     response = signed_in.post(
         f"{base_url}/api/search",

@@ -49,9 +49,11 @@ import type { Category, Region, SearchMode, SearchState } from "./types";
 
 /** Фильтр моделей осмыслен только для смартфонов Apple. */
 const IPHONE_CATEGORY_ID = "apple_phones";
+const ALL_CATEGORY_ID = "all";
 
 const DEFAULT_REGION: Region = { slug: "all", name: "Вся Россия" };
 const DEFAULT_CATEGORY: Category = { id: IPHONE_CATEGORY_ID, name: "Смартфоны Apple" };
+const ALL_CATEGORY: Category = { id: ALL_CATEGORY_ID, name: "Все категории" };
 
 /**
  * Категории до ответа сервера.
@@ -60,6 +62,7 @@ const DEFAULT_CATEGORY: Category = { id: IPHONE_CATEGORY_ID, name: "Смартф
  * иначе при медленной сети пользователь видит пустой выпадающий список.
  */
 const FALLBACK_CATEGORIES: Category[] = [
+  ALL_CATEGORY,
   DEFAULT_CATEGORY,
   { id: "game_consoles", name: "Игровые приставки" },
   { id: "laptops_apple", name: "Ноутбуки Apple" },
@@ -193,6 +196,8 @@ export function mountMonitor(
   const iphoneFilterApplies = (): boolean =>
     searchMode === "query" && category.id === IPHONE_CATEGORY_ID;
 
+  const isAllCategories = (): boolean => searchMode === "query" && category.id === ALL_CATEGORY_ID;
+
   /** Подсветить кнопку фильтров, если условия отличаются от обычных. */
   const syncFiltersButton = (): void => {
     const custom =
@@ -210,6 +215,7 @@ export function mountMonitor(
       searchMode,
       selectedSavedUrlId: savedUrls.selectedId(),
       hideImages,
+      query: isAllCategories() ? queryEl.value.trim() : "",
     });
   };
 
@@ -297,7 +303,24 @@ export function mountMonitor(
     queryClearBtn.classList.toggle("hidden", !queryEl.value.trim());
   };
 
+  const syncQueryField = (): void => {
+    const byUrl = searchMode === "url";
+    const showQuery = byUrl || isAllCategories();
+    searchFieldWrap.classList.toggle("hidden", !showQuery);
+    queryEl.type = "search";
+    queryEl.placeholder = byUrl ? "Вставьте ссылку или выберите из списка" : "Что искать";
+    if (byUrl) {
+      queryEl.setAttribute("inputmode", "url");
+      queryEl.setAttribute("autocomplete", "url");
+    } else {
+      queryEl.removeAttribute("inputmode");
+      queryEl.setAttribute("autocomplete", "off");
+    }
+    syncQueryClear();
+  };
+
   const setSearchMode = (mode: SearchMode): void => {
+    const previous = searchMode;
     searchMode = mode;
     modeQueryBtn.classList.toggle("active", mode === "query");
     modeUrlBtn.classList.toggle("active", mode === "url");
@@ -306,27 +329,15 @@ export function mountMonitor(
     regionWrap.classList.toggle("hidden", byUrl);
     searchSettingsCats.classList.toggle("hidden", byUrl);
     searchSettingsUrl.classList.toggle("hidden", !byUrl);
-    // Поле ввода нужно только в режиме ссылки: в обычном поиске условия
-    // задаются регионом и категорией.
-    searchFieldWrap.classList.toggle("hidden", !byUrl);
-    if (!byUrl) queryEl.value = "";
-
-    queryEl.type = "search";
-    queryEl.placeholder = byUrl ? "Вставьте ссылку или выберите из списка" : "Поиск по объявлениям";
-    if (byUrl) {
-      queryEl.setAttribute("inputmode", "url");
-      queryEl.setAttribute("autocomplete", "url");
-    } else {
-      queryEl.removeAttribute("inputmode");
-      queryEl.setAttribute("autocomplete", "off");
-    }
+    // Поле нужно в режиме ссылки и в поиске по всем категориям.
+    if (!byUrl && (previous === "url" || !isAllCategories())) queryEl.value = "";
+    syncQueryField();
 
     savedUrls.setVisible(byUrl);
     if (byUrl) {
       savedUrls.fillQueryIfEmpty();
       setFilterSectionOpen(searchSettingsUrl, true);
     }
-    syncQueryClear();
     syncIphoneSection();
     syncFiltersButton();
     syncSearchControls();
@@ -353,6 +364,7 @@ export function mountMonitor(
       })
       .join("");
     categoryLabel.textContent = category.name;
+    syncQueryField();
     syncIphoneSection();
     syncFiltersButton();
     syncSearchControls();
@@ -413,9 +425,9 @@ export function mountMonitor(
   /** Привести форму к тому, что реально запущено на сервере. */
   const applyServerState = (state: SearchState): void => {
     if (state.search_mode) setSearchMode(state.search_mode);
-    if (state.search_mode === "url" && state.query) {
+    if (state.query && (state.search_mode === "url" || state.category?.id === ALL_CATEGORY_ID)) {
       queryEl.value = state.query;
-      savedUrls.syncSelectionFromQuery();
+      if (state.search_mode === "url") savedUrls.syncSelectionFromQuery();
     }
     if (state.region?.slug) setRegion(state.region);
     if (state.category?.id) {
@@ -436,6 +448,11 @@ export function mountMonitor(
       queryEl.focus();
       return;
     }
+    if (isAllCategories() && !value) {
+      notice("Введите поисковый запрос", "error");
+      queryEl.focus();
+      return;
+    }
     if (iphoneFilterApplies() && !iphoneModels.length) {
       notice("Выберите хотя бы одну модель iPhone", "error");
       setFilterSectionOpen(searchSettingsIphone, true);
@@ -451,7 +468,7 @@ export function mountMonitor(
           ? { mode: "url", url: value, seller_skip: sellerSkip, iphone_models: models }
           : {
               mode: "query",
-              query: "",
+              query: isAllCategories() ? value : "",
               region: region.slug,
               category: category.id,
               seller_skip: sellerSkip,
@@ -491,6 +508,7 @@ export function mountMonitor(
       regionLabel.textContent = region.name;
     }
     if (saved.category) category = resolveCategory(saved.category.id);
+    if (saved.query && category.id === ALL_CATEGORY_ID) queryEl.value = saved.query;
     hideImages = saved.hideImages;
     hideImagesCheck.checked = hideImages;
     savedUrls.restore({
@@ -522,6 +540,7 @@ export function mountMonitor(
     queryEl.addEventListener("input", () => {
       syncQueryClear();
       if (searchMode === "url") savedUrls.handleQueryInput();
+      else persistSettings();
     });
     queryEl.addEventListener("focus", () => {
       if (searchMode === "url") savedUrls.handleQueryFocus();
@@ -589,7 +608,7 @@ export function mountMonitor(
         id: choice.dataset.id || IPHONE_CATEGORY_ID,
         name: choice.dataset.name || "",
       };
-      queryEl.value = "";
+      if (category.id !== ALL_CATEGORY_ID) queryEl.value = "";
       syncQueryClear();
       renderCategories();
       setDropdownOpen(categoryDropdown, false);

@@ -145,18 +145,14 @@ export function createAvitoSession(opts: {
     const label = new ButtonLabel(btn);
     label.set("…");
     btn.disabled = true;
-    // Вкладку открываем до запроса: после await браузер посчитает открытие
-    // всплывающим окном и заблокирует его.
-    const callTab = window.open("about:blank", "_blank", "noopener,noreferrer");
     try {
       const result = await api.avitoPhone(id);
       if (result.ok && result.phone) {
         phones.set(id, result.phone);
         label.set(result.phone);
-        dial(result.phone, callTab);
+        dial(result.phone);
         return;
       }
-      callTab?.close();
       label.restore();
       if (SESSION_LOST_CODES.has(result.code || "")) {
         setConnected(false);
@@ -165,7 +161,6 @@ export function createAvitoSession(opts: {
         window.alert(result.error || "Номер недоступен");
       }
     } catch (err) {
-      callTab?.close();
       label.restore();
       window.alert(err instanceof Error ? err.message : String(err));
     } finally {
@@ -213,28 +208,14 @@ class ButtonLabel {
 }
 
 /**
- * Позвонить по номеру.
+ * Позвонить по номеру в этом же окне.
  *
- * Ссылку `tel:` открываем в заранее подготовленной вкладке. Если её нет,
- * создаём временную ссылку и «нажимаем» её: на мобильных это надёжнее,
- * чем присваивание `location.href`.
+ * Новую вкладку не открываем: `about:blank` и `tel:` с `target=_blank`
+ * оставляют белую страницу, которую потом приходится закрывать руками.
+ * Схему `tel:` браузер отдаёт системе и страницу не выгружает.
  */
-function dial(phone: string, targetWindow: Window | null = null): void {
+function dial(phone: string): void {
   const digits = phone.trim().replace(/[^\d+]/g, "") || phone.trim();
-  const href = `tel:${digits}`;
-  if (targetWindow && !targetWindow.closed) {
-    try {
-      targetWindow.location.href = href;
-      return;
-    } catch {
-      // Вкладку мог закрыть пользователь — уходим на запасной путь.
-    }
-  }
-  const link = document.createElement("a");
-  link.href = href;
-  link.target = "_blank";
-  link.rel = "noopener noreferrer";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
+  if (!digits) return;
+  window.location.assign(`tel:${digits}`);
 }

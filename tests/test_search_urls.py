@@ -24,9 +24,13 @@ def test_web_url_uses_region_and_category_path() -> None:
     assert "owner[]=private" in url
 
 
-def test_moscow_uses_wider_avito_slug() -> None:
-    """В путях Avito Москва идёт вместе с областью."""
-    assert "https://www.avito.ru/moskva_i_mo/" in catalog.build_web_url("", "moskva", "tablets")
+def test_moscow_city_and_moscow_area_are_different_urls() -> None:
+    """Москва и «Москва и МО» на Avito — разные регионы, разные пути."""
+    city = catalog.build_web_url("", "moskva", "tablets")
+    area = catalog.build_web_url("", "moskva_i_mo", "tablets")
+    assert "https://www.avito.ru/moskva/" in city
+    assert "https://www.avito.ru/moskva_i_mo/" in area
+    assert city != area
 
 
 def test_web_url_keeps_category_extra_params() -> None:
@@ -45,6 +49,21 @@ def test_unknown_category_is_rejected() -> None:
         catalog.find_category("нет такой")
 
 
+def test_all_categories_web_url_has_region_date_and_private() -> None:
+    """Без категории остаётся регион, свежие и только частные."""
+    url = catalog.build_web_url("iphone 15", "kazan", catalog.ALL_CATEGORY_ID)
+    assert url.startswith("https://www.avito.ru/kazan?")
+    assert "/telefony" not in url
+    assert "q=iphone%2015" in url
+    assert "s=104" in url
+    assert "owner[]=private" in url
+
+
+def test_all_categories_requires_query() -> None:
+    with pytest.raises(ValueError, match="запрос"):
+        plan_search("", "moskva", catalog.ALL_CATEGORY_ID)
+
+
 # ── Локальная сборка API URL ───────────────────────────────────────────────
 
 
@@ -52,7 +71,8 @@ def test_unknown_category_is_rejected() -> None:
     ("region", "category", "expected"),
     [
         ("all", "apple_phones", ["categoryId=84", "locationId=621540"]),
-        ("moskva", "game_consoles", ["categoryId=97", "locationId=107620", "params%5B137%5D=613"]),
+        ("moskva", "game_consoles", ["categoryId=97", "locationId=637640", "params%5B137%5D=613"]),
+        ("moskva_i_mo", "game_consoles", ["categoryId=97", "locationId=107620"]),
         ("moskva", "laptops_apple", ["categoryId=98", "params%5B112916%5D=841338"]),
         ("all", "tablets", ["categoryId=96", "params%5B140%5D=4995"]),
     ],
@@ -62,6 +82,16 @@ def test_api_url_built_locally(region: str, category: str, expected: list[str]) 
     assert url is not None
     for fragment in [*expected, "sort=date", "privateOnly=1"]:
         assert fragment in url
+
+
+def test_all_categories_api_url_has_query_and_no_category() -> None:
+    url = catalog.build_api_url("moskva", catalog.ALL_CATEGORY_ID, query="iphone")
+    assert url is not None
+    assert "categoryId=" not in url
+    assert "q=iphone" in url
+    assert "sort=date" in url
+    assert "privateOnly=1" in url
+    assert "locationId=637640" in url
 
 
 def test_api_url_unknown_region_needs_service() -> None:
