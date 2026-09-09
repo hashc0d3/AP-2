@@ -28,6 +28,17 @@ def test_extract_phone_from_action_uri_number() -> None:
     assert phone.extract_phone(payload) == "+79001112233"
 
 
+def test_extract_phone_ignores_scheme_version_in_uri() -> None:
+    """``ru.avito://1/...`` не должен превращать +7 в +1."""
+    payload = {
+        "status": "ok",
+        "result": {
+            "action": {"uri": "ru.avito://1/call?number=%2B79161234567"},
+        },
+    }
+    assert phone.extract_phone(payload) == "+79161234567"
+
+
 def test_extract_phone_normalizes_eight() -> None:
     assert phone.extract_phone({"phone": "89001112233"}) == "+79001112233"
 

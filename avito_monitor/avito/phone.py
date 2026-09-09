@@ -49,14 +49,14 @@ _PHONE_KEY_PATTERNS = (
     r"phone\?key=([a-f0-9]{20,})",
 )
 _DIGITS = re.compile(r"\d+")
+_URI_PHONE_RE = re.compile(
+    r"(?:tel:|(?:^|[?&#])number=)(\+?[\d\s\-()]{8,})",
+    re.IGNORECASE,
+)
 
 
-def _normalize_number(raw: str) -> str | None:
-    """Свести строку Avito к ``+7…``. Мусор и короткие куски отбрасываем."""
-    text = unquote(raw or "").strip()
-    if not text:
-        return None
-    digits = "".join(_DIGITS.findall(text))
+def _digits_to_e164(raw: str) -> str | None:
+    digits = "".join(_DIGITS.findall(raw))
     if len(digits) == 11 and digits[0] in "78":
         return "+7" + digits[1:]
     if len(digits) == 10:
@@ -64,6 +64,23 @@ def _normalize_number(raw: str) -> str | None:
     if 11 <= len(digits) <= 15:
         return "+" + digits
     return None
+
+
+def _normalize_number(raw: str) -> str | None:
+    """Свести строку Avito к ``+7…``. Мусор и короткие куски отбрасываем.
+
+    В ``action.uri`` номер лежит в ``tel:`` / ``number=``. Нельзя собирать
+    все цифры из URI: версия схемы ``://1/`` прилипает слева и даёт ``+1…``.
+    """
+    text = unquote(raw or "").strip()
+    if not text:
+        return None
+    match = _URI_PHONE_RE.search(text)
+    if match:
+        return _digits_to_e164(match.group(1))
+    if "://" in text:
+        return None
+    return _digits_to_e164(text)
 
 
 def _walk_for_phone(node: Any, field: str = "") -> str | None:
