@@ -41,15 +41,16 @@ def normalize_import(payload: Any) -> dict[str, Any]:
     :raises ValueError: разобрать выгрузку не удалось.
     """
     if isinstance(payload, list):
-        return {
-            "cookies": {
-                str(item["name"]): str(item["value"])
-                for item in payload
-                if isinstance(item, dict)
-                and item.get("name") is not None
-                and item.get("value") is not None
-            }
-        }
+        cookies: dict[str, str] = {}
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name") if item.get("name") is not None else item.get("Name")
+            value = item.get("value") if item.get("value") is not None else item.get("Value")
+            if name is None or value is None:
+                continue
+            cookies[str(name)] = str(value)
+        return {"cookies": cookies}
 
     if not isinstance(payload, dict):
         raise ValueError("Ожидается JSON-объект или массив cookies")
@@ -197,7 +198,7 @@ def build_user_client(session: dict, proxy_string: str = "") -> Session:
     )
 
 
-def fetch_phone(ad_id: str | int) -> dict[str, Any]:
+def fetch_phone(ad_id: str | int, phone_key: str | None = None) -> dict[str, Any]:
     """Запросить номер объявления от имени пользователя.
 
     Сначала пробуем напрямую: вход в Avito выполнен с этого же IP, и такой
@@ -218,7 +219,8 @@ def fetch_phone(ad_id: str | int) -> dict[str, Any]:
             "code": "not_logged_in",
         }
 
-    result = request_phone(build_user_client(session), ad_id)
+    key = (phone_key or "").strip() or None
+    result = request_phone(build_user_client(session), ad_id, phone_key=key)
     if result.get("ok"):
         logger.info(f"Номер ad={ad_id}: получен напрямую")
         return result
@@ -226,7 +228,7 @@ def fetch_phone(ad_id: str | int) -> dict[str, Any]:
     proxy_string = load_settings().proxy_string
     if proxy_string and result.get("code") in _RETRY_VIA_PROXY_CODES:
         logger.info(f"Номер ad={ad_id}: повтор через прокси")
-        result = request_phone(build_user_client(session, proxy_string), ad_id)
+        result = request_phone(build_user_client(session, proxy_string), ad_id, phone_key=key)
 
     if result.get("ok"):
         logger.info(f"Номер ad={ad_id}: получен через прокси")

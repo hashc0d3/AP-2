@@ -146,7 +146,7 @@ export function createAvitoSession(opts: {
     label.set("…");
     btn.disabled = true;
     try {
-      const result = await api.avitoPhone(id);
+      const result = await api.avitoPhone(id, ad.phone_key);
       if (result.ok && result.phone) {
         phones.set(id, result.phone);
         label.set(result.phone);

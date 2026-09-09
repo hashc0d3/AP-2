@@ -182,10 +182,13 @@ export const api = {
   clearAvitoSession: (): Promise<AvitoSession> =>
     request("/api/avito/session/clear", { method: "POST" }),
 
-  avitoPhone: (adId: string | number): Promise<AvitoPhoneResult> =>
+  avitoPhone: (adId: string | number, phoneKey?: string): Promise<AvitoPhoneResult> =>
     request("/api/avito/phone", {
       method: "POST",
-      body: { ad_id: String(adId) },
+      body: {
+        ad_id: String(adId),
+        ...(phoneKey ? { phone_key: phoneKey } : {}),
+      },
       timeoutMs: PHONE_TIMEOUT_MS,
     }),
 

@@ -257,6 +257,7 @@ def test_serialize_ad_has_frontend_contract() -> None:
         "published",
         "ts",
         "description",
+        "phone_key",
     }
     assert ad["id"] == 42
     assert ad["title"] == "iPhone 13 Pro 256GB"

@@ -203,7 +203,8 @@ def _avito_phone(request: Request) -> Response:
     ad_id = payload.get("ad_id") or payload.get("id")
     if not ad_id:
         raise ValueError("Укажите ad_id")
-    return Response(payload=user_session.fetch_phone(ad_id))
+    phone_key = str(payload.get("phone_key") or payload.get("key") or "").strip()
+    return Response(payload=user_session.fetch_phone(ad_id, phone_key=phone_key or None))
 
 
 # ── Баланс сервиса ─────────────────────────────────────────────────────────

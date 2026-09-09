@@ -16,6 +16,8 @@ from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from avito_monitor.avito.phone import find_phone_key
+
 MAX_IMAGES = 12
 """Столько фотографий показываем в карточке."""
 
@@ -472,4 +474,5 @@ def serialize_ad(item: dict, *, tz_name: str) -> dict:
         "published": format_published(added_ts, tz_name),
         "ts": added_ts,
         "description": ad_description(item),
+        "phone_key": find_phone_key(item) or "",
     }
