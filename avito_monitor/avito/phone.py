@@ -29,7 +29,7 @@ ITEM_URLS = (
 )
 CARD_URL = "https://www.avito.ru/items/{id}"
 
-REQUEST_TIMEOUT = 30.0
+REQUEST_TIMEOUT = 8.0
 _BLOCKED_STATUSES = {403, 429, 439}
 
 _PHONE_PATTERNS = (
@@ -145,13 +145,18 @@ def fetch_phone(client: curl_requests.Session, ad_id: str | int) -> dict[str, An
     client.headers["referer"] = CARD_URL.format(id=ad_id)
     client.headers.setdefault("accept", "application/json, text/plain, */*")
 
-    phone_key = _lookup_phone_key(client, ad_id)
-
-    result = _request_phone(client, ad_id, phone_key)
+    # Сначала сам номер: ключ часто не нужен, а поиск ключа — лишние секунды
+    # на зависших URL, из-за которых браузер успевает оборвать запрос.
+    result = _request_phone(client, ad_id, None)
     if result is not None:
         return result
 
-    # Последняя попытка: ключ мог быть только в HTML карточки.
+    phone_key = _lookup_phone_key(client, ad_id)
+    if phone_key:
+        result = _request_phone(client, ad_id, phone_key)
+        if result is not None:
+            return result
+
     _, page = _get(client, CARD_URL.format(id=ad_id))
     if isinstance(page, str):
         phone_key = phone_key or find_phone_key(page)

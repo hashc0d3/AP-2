@@ -27,6 +27,12 @@ const DEFAULT_TIMEOUT_MS = 15000;
  */
 const START_SEARCH_TIMEOUT_MS = 45000;
 
+/**
+ * Номер телефона: сервер ходит в Avito (иногда через прокси). 15 с мало —
+ * браузер обрывал запрос, хотя номер у объявления был.
+ */
+const PHONE_TIMEOUT_MS = 60000;
+
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
 type RequestOptions = {
@@ -66,7 +72,7 @@ async function readJson<T>(response: Response): Promise<T> {
 
 function asFriendlyError(err: unknown): Error {
   if (err instanceof DOMException && err.name === "AbortError") {
-    return new Error("Сервер не ответил вовремя — проверьте, что приложение запущено");
+    return new Error("Запрос не успел завершиться — попробуйте ещё раз");
   }
   // fetch бросает TypeError, когда до сервера вообще не дошли.
   if (err instanceof TypeError) {
@@ -177,7 +183,11 @@ export const api = {
     request("/api/avito/session/clear", { method: "POST" }),
 
   avitoPhone: (adId: string | number): Promise<AvitoPhoneResult> =>
-    request("/api/avito/phone", { method: "POST", body: { ad_id: String(adId) } }),
+    request("/api/avito/phone", {
+      method: "POST",
+      body: { ad_id: String(adId) },
+      timeoutMs: PHONE_TIMEOUT_MS,
+    }),
 
   // ── Баланс сервиса cookies ──────────────────────────────────────────
   resourceBalance: (): Promise<SpfaBalance> => request("/api/resource/balance"),
