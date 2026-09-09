@@ -26,6 +26,11 @@ PID_PATH = COOKIES_DIR / "service.pid"
 _WINDOWS_STILL_ACTIVE = 259
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
+# True, когда этот процесс сам взял обслуживание. Нужно отличать свой
+# живой поток от leftover PID в Docker: контейнер почти всегда PID 1,
+# а файл лежит на томе и переживает restart.
+_owned_by_this_process = False
+
 
 def _pid_alive(pid: int) -> bool:
     """Жив ли процесс с таким PID."""
@@ -64,30 +69,38 @@ def _pid_alive_windows(pid: int) -> bool:
 
 def service_running() -> bool:
     """Обслуживает ли пул кто-то ещё. Устаревший PID-файл удаляется."""
+    if _owned_by_this_process:
+        return True
     if not PID_PATH.exists():
         return False
     try:
         pid = int(PID_PATH.read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
         return False
-    if _pid_alive(pid):
+    if _pid_alive(pid) and pid != os.getpid():
         return True
+    # Свой PID в файле, но поток мы не запускали — это leftover после
+    # docker restart: новый контейнер снова PID 1, старый файл врёт.
     PID_PATH.unlink(missing_ok=True)
     return False
 
 
 def _claim_pid() -> None:
+    global _owned_by_this_process
     COOKIES_DIR.mkdir(parents=True, exist_ok=True)
     PID_PATH.write_text(str(os.getpid()), encoding="utf-8")
+    _owned_by_this_process = True
 
 
 def _release_pid() -> None:
     """Убрать свой PID-файл, не тронув чужой."""
+    global _owned_by_this_process
     try:
         if PID_PATH.exists() and PID_PATH.read_text(encoding="utf-8").strip() == str(os.getpid()):
             PID_PATH.unlink(missing_ok=True)
     except OSError:
         pass
+    _owned_by_this_process = False
 
 
 def run_loop(settings: Settings | None = None) -> None:

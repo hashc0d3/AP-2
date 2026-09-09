@@ -69,6 +69,7 @@ def isolated_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     for module, constants in _PATCHED_PATHS.items():
         for name, relative in constants.items():
             monkeypatch.setattr(module, name, tmp_path / relative)
+    monkeypatch.setattr(service, "_owned_by_this_process", False)
     return tmp_path
 
 
