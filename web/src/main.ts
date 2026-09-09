@@ -23,7 +23,6 @@ userMenuRef = mountUserMenu({
   onAvitoClick: () => monitorRef?.openAvito(),
   onLogout: () => {
     void api.logout().then(() => {
-      authBtn.classList.remove("hidden");
       shellUser.classList.add("hidden");
       shellAppTools.classList.add("hidden");
       app.classList.add("hidden");
@@ -40,7 +39,6 @@ const authLogin = document.getElementById("auth-login") as HTMLInputElement;
 const authPassword = document.getElementById("auth-password") as HTMLInputElement;
 const authSubmit = document.getElementById("auth-submit") as HTMLButtonElement;
 const authHint = document.getElementById("auth-hint") as HTMLElement;
-const authBtn = document.getElementById("auth-btn") as HTMLButtonElement;
 const shellUser = document.getElementById("shell-user") as HTMLElement;
 const shellAppTools = document.getElementById("shell-app-tools") as HTMLElement;
 
@@ -50,7 +48,6 @@ function showAuth(): void {
   app.classList.add("hidden");
   shellUser.classList.add("hidden");
   shellAppTools.classList.add("hidden");
-  authBtn.classList.remove("hidden");
   userMenuRef?.close();
   authHint.textContent = "";
   authPassword.value = "";
@@ -63,7 +60,6 @@ function showApp(username: string): void {
   userMenuRef?.setUsername(username);
   shellUser.classList.remove("hidden");
   shellAppTools.classList.remove("hidden");
-  authBtn.classList.add("hidden");
   monitor.show();
 }
 
@@ -79,10 +75,6 @@ authSubmit.addEventListener("click", () => {
     .finally(() => {
       authSubmit.disabled = false;
     });
-});
-
-authBtn.addEventListener("click", () => {
-  showAuth();
 });
 
 document.getElementById("auth-form")?.addEventListener("submit", (ev) => {

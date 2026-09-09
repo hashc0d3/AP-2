@@ -1544,6 +1544,11 @@ button.card-media:hover img {
   background: linear-gradient(180deg, #3b82f6, #2563eb);
 }
 
+a.card-btn {
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
 .card-desc {
   width: 100%;
   min-width: 0;

@@ -131,7 +131,8 @@ function actionHtml(ad: Ad): string {
   if (ad.can_call) {
     return `<button class="card-btn call" type="button" data-action="call">${ICON_PHONE}<span>Позвонить</span></button>`;
   }
-  return `<button class="card-btn open-ad" type="button" data-action="open-ad">${ICON_EXT}<span>Открыть объявление</span></button>`;
+  const web = escapeHtml(itemWebUrl(ad));
+  return `<a class="card-btn open-ad" href="${web}" target="_blank" rel="noopener">${ICON_EXT}<span>Открыть объявление</span></a>`;
 }
 
 function descriptionHtml(ad: Ad): string {
@@ -167,11 +168,6 @@ function bindActions(
   callBtn?.addEventListener("click", (ev) => {
     ev.preventDefault();
     opts.onCall(ad, callBtn);
-  });
-
-  action("open-ad")?.addEventListener("click", (ev) => {
-    ev.preventDefault();
-    window.open(itemWebUrl(ad), "_blank", "noopener");
   });
 
   action("zoom-photo")?.addEventListener("click", (ev) => {

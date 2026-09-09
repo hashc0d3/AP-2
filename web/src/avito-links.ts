@@ -13,3 +13,19 @@ export function itemWebUrl(ad: Ad): string {
   }
   return `https://www.avito.ru/items/${String(ad.id)}`;
 }
+
+/**
+ * Открыть объявление так же, как клик по названию: настоящая ссылка.
+ *
+ * `window.open` в установленном PWA на iPhone открывает пустое окно
+ * внутри приложения. Переход через `<a target="_blank">` уходит в Safari.
+ */
+export function openAvitoListing(ad: Ad): void {
+  const link = document.createElement("a");
+  link.href = itemWebUrl(ad);
+  link.target = "_blank";
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}

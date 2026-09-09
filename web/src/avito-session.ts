@@ -11,7 +11,7 @@
  */
 
 import { api } from "./api";
-import { itemWebUrl } from "./avito-links";
+import { openAvitoListing } from "./avito-links";
 import { button, el, textarea } from "./dom";
 import { isIosDevice } from "./push-notify";
 import type { Ad } from "./types";
@@ -128,7 +128,7 @@ export function createAvitoSession(opts: {
 
   const requestPhone = async (ad: Ad, btn: HTMLButtonElement): Promise<void> => {
     if (!ad.can_call) {
-      window.open(itemWebUrl(ad), "_blank", "noopener");
+      openAvitoListing(ad);
       return;
     }
     const id = String(ad.id);
