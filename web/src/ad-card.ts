@@ -176,7 +176,7 @@ function bindActions(
 
   action("zoom-photo")?.addEventListener("click", (ev) => {
     stop(ev);
-    const photo = ad.images?.find(Boolean);
+    const photo = card.querySelector<HTMLImageElement>(".card-media img");
     if (photo) openImageLightbox(photo);
   });
 
