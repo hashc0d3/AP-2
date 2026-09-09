@@ -179,12 +179,16 @@ def _runtime_settings(settings: Settings, search: dict) -> Settings:
     не перезапуская поиск, и он должен подействовать сразу.
     """
     models = search.get("iphone_models")
+    category_id = str((search.get("category") or {}).get("id") or "")
+    if category_id != catalog.IPHONE_CATEGORY_ID:
+        models = None
     return settings.for_search(
         web_url=search.get("web_url") or "",
         api_url=search.get("api_url") or "",
         seller_skip=tuple(search.get("seller_skip") or ()),
         iphone_models=tuple(models) if models is not None else None,
         iphone_models_in_url=bool(search.get("iphone_models_in_url")),
+        category_id=category_id,
     )
 
 

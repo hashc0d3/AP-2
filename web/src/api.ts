@@ -87,8 +87,8 @@ export type StartSearchPayload = {
 
 function startSearchBody(payload: StartSearchPayload): Record<string, unknown> {
   const sellerSkip = payload.seller_skip ?? [];
-  // Ключ iphone_models пропускаем, если он не задан: на сервере `null`
-  // означает «фильтр выключен», а отсутствие ключа — «не менять».
+  // `null` выключает фильтр моделей (планшеты, ноутбуки, приставки).
+  // Ключ пропускаем только если поле не передали вовсе.
   const models =
     payload.iphone_models !== undefined ? { iphone_models: payload.iphone_models } : {};
   if (payload.mode === "url") {

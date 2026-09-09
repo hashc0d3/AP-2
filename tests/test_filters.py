@@ -161,11 +161,20 @@ def test_notify_max_age_drops_late_arrivals(base_settings: Settings) -> None:
 
 
 def test_iphone_model_filter_applies(base_settings: Settings) -> None:
-    settings = replace(base_settings, iphone_models=("13-pro",))
+    settings = replace(base_settings, iphone_models=("13-pro",), category_id="apple_phones")
     ads = [_ad(1, title="iPhone 13 Pro"), _ad(2, title="iPhone 14 Pro")]
     selected, stats = filters.select_new_ads(ads, settings, set(), first_run=True)
     assert [ad["id"] for ad in selected] == [1]
     assert stats.iphone_model == 1
+
+
+def test_iphone_model_filter_ignored_for_tablets(base_settings: Settings) -> None:
+    """Даже если в сессии остались модели iPhone, планшеты они не режут."""
+    settings = replace(base_settings, iphone_models=("13-pro",), category_id="tablets")
+    ads = [_ad(1, title="iPad Air 13 m3 256gb Purple")]
+    selected, stats = filters.select_new_ads(ads, settings, set(), first_run=True)
+    assert [ad["id"] for ad in selected] == [1]
+    assert stats.iphone_model == 0
 
 
 def test_model_filter_skipped_when_already_in_url(base_settings: Settings) -> None:

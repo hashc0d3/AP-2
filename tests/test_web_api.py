@@ -266,6 +266,34 @@ def test_start_search_all_categories_builds_links(
     signed_in.post(f"{base_url}/api/search/stop", timeout=5)
 
 
+def test_tablet_search_clears_leftover_iphone_models(
+    signed_in: requests.Session, base_url: str
+) -> None:
+    """После поиска iPhone фильтр моделей не должен переехать на планшеты."""
+    first = signed_in.post(
+        f"{base_url}/api/search",
+        json={
+            "region": "all",
+            "category": "apple_phones",
+            "iphone_models": ["13-pro"],
+        },
+        timeout=10,
+    )
+    assert first.status_code == 200
+    assert first.json()["iphone_models"] == ["13-pro"]
+
+    second = signed_in.post(
+        f"{base_url}/api/search",
+        json={"region": "all", "category": "tablets"},
+        timeout=10,
+    )
+    assert second.status_code == 200
+    payload = second.json()
+    assert payload["category"]["id"] == "tablets"
+    assert payload["iphone_models"] is None
+    signed_in.post(f"{base_url}/api/search/stop", timeout=5)
+
+
 def test_start_search_returns_links(signed_in: requests.Session, base_url: str) -> None:
     response = signed_in.post(
         f"{base_url}/api/search",

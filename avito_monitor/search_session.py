@@ -107,8 +107,7 @@ class SearchSession:
             self._error = ""
             if seller_skip is not None:
                 self._seller_skip = _unique_strings(seller_skip)
-            if iphone_models is not None:
-                self._iphone_models = iphone_models
+            self._iphone_models = iphone_models
             self._iphone_models_in_url = iphone_models_in_url
         self._changed.set()
         return self.snapshot()
@@ -214,9 +213,14 @@ def start_search(
         api_url, models_in_url = iphone_params.append_model_params(api_url, plan.iphone_models)
     logger.info(f"API URL: {api_url}")
 
-    normalized_models = (
-        iphone.normalize_models(iphone_models) if iphone_models is not None else None
-    )
+    # Фильтр моделей — только для смартфонов. Иначе список с прошлого
+    # поиска по iPhone остаётся в сессии и режет планшеты и остальное.
+    if plan.category is None or plan.category.id != catalog.IPHONE_CATEGORY_ID:
+        normalized_models = None
+    else:
+        normalized_models = (
+            iphone.normalize_models(iphone_models) if iphone_models is not None else None
+        )
     return SESSION.start(
         plan,
         api_url,

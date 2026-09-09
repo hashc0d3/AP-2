@@ -14,7 +14,7 @@ from typing import Any
 
 from loguru import logger
 
-from avito_monitor.avito import iphone
+from avito_monitor.avito import catalog, iphone
 from avito_monitor.paths import CONFIG_PATH, ENV_PATH
 
 # Секреты и доступы читаются только из окружения, не из config.toml.
@@ -89,6 +89,8 @@ class Settings:
     # ── Рантайм текущего поиска ─────────────────────────────────────────
     web_url: str = ""
     api_url: str = ""
+    category_id: str = ""
+    """Категория текущего поиска; фильтр iPhone действует только для смартфонов."""
 
     def __post_init__(self) -> None:
         # Значения из конфига могут быть любыми: приводим к разумным границам
@@ -117,6 +119,7 @@ class Settings:
         seller_skip: tuple[str, ...] | None = None,
         iphone_models: tuple[str, ...] | None = None,
         iphone_models_in_url: bool = False,
+        category_id: str = "",
     ) -> Settings:
         """Копия настроек с параметрами конкретного поиска из веб-интерфейса.
 
@@ -130,6 +133,7 @@ class Settings:
             self,
             web_url=web_url,
             api_url=api_url,
+            category_id=category_id or self.category_id,
             seller_skip=merged_skip,
             iphone_models=self.iphone_models if iphone_models is None else iphone_models,
             iphone_models_in_url=iphone_models_in_url or self.iphone_models_in_url,
@@ -137,7 +141,14 @@ class Settings:
 
     @property
     def filters_iphone_models(self) -> bool:
-        """Нужно ли отсеивать модели iPhone по названию объявления."""
+        """Нужно ли отсеивать модели iPhone по названию объявления.
+
+        Только для категории смартфонов Apple. В планшетах, ноутбуках,
+        приставках и по своей ссылке список моделей с прошлого поиска
+        не должен ничего резать.
+        """
+        if self.category_id and self.category_id != catalog.IPHONE_CATEGORY_ID:
+            return False
         if self.iphone_models_in_url:
             return False
         return self.iphone_models is not None or self.iphone_min_model > 0

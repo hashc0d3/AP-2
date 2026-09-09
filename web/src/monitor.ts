@@ -461,7 +461,7 @@ export function mountMonitor(
 
     setStarting(true);
     try {
-      const models = iphoneFilterApplies() ? iphoneModelsToPayload(iphoneModels) : undefined;
+      const models = iphoneFilterApplies() ? iphoneModelsToPayload(iphoneModels) : null;
       const sellerSkip = loadSellerBlacklist();
       const state = await api.startSearch(
         searchMode === "url"

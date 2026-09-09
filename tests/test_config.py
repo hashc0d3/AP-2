@@ -244,3 +244,13 @@ def test_url_filter_disables_title_filter() -> None:
 def test_generation_filter_also_enables_title_filter() -> None:
     assert Settings(iphone_min_model=14).filters_iphone_models is True
     assert Settings().filters_iphone_models is False
+
+
+def test_iphone_title_filter_stays_on_phones() -> None:
+    """Список моделей с прошлого поиска не режет планшеты и приставки."""
+    leftover = Settings(iphone_models=("13-pro",), category_id="tablets")
+    assert leftover.filters_iphone_models is False
+    consoles = leftover.for_search(web_url="", api_url="", category_id="game_consoles")
+    assert consoles.filters_iphone_models is False
+    phones = leftover.for_search(web_url="", api_url="", category_id="apple_phones")
+    assert phones.filters_iphone_models is True
