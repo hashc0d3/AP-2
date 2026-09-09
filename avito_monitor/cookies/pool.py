@@ -49,9 +49,6 @@ _UNUSABLE_STATUSES = frozenset({STATUS_BLOCKED, STATUS_DEAD})
 _AFTER_BUY_PAUSE = 3.0
 _BETWEEN_UNBLOCK_PAUSE = 2.0
 
-WAIT_ATTEMPTS = 8
-WAIT_PAUSE = 3.0
-
 
 # ── Чтение и запись ────────────────────────────────────────────────────────
 
@@ -199,7 +196,7 @@ def import_legacy() -> dict | None:
     return existing
 
 
-def buy_one(settings: Settings) -> dict:
+def buy_one(settings: Settings, *, pause: bool = True) -> dict:
     """Купить набор cookies и положить в пул.
 
     :raises spfa.SpfaError: сервис не отдал набор.
@@ -229,8 +226,17 @@ def buy_one(settings: Settings) -> dict:
         }
     )
     logger.info(f"В пул добавлен id={slot['id']}")
-    time.sleep(_AFTER_BUY_PAUSE)
+    if pause:
+        time.sleep(_AFTER_BUY_PAUSE)
     return slot
+
+
+def replenish_if_empty(settings: Settings) -> dict | None:
+    """Если рабочих наборов нет — купить один сразу, без ожидания сервиса."""
+    if usable_slots():
+        return None
+    logger.warning("Рабочих cookies нет — докупаю сразу")
+    return buy_one(settings, pause=False)
 
 
 def ensure_pool(settings: Settings) -> list[dict]:
@@ -239,6 +245,9 @@ def ensure_pool(settings: Settings) -> list[dict]:
     target = pool_size(settings)
     while len(alive_slots()) < target:
         buy_one(settings)
+
+    if not usable_slots():
+        replenish_if_empty(settings)
 
     for slot in list_slots():
         if slot.get("status") != STATUS_DEAD:
@@ -370,27 +379,32 @@ def next_cookie(exclude: Any = None) -> dict | None:
 
 def wait_ready_cookie(
     exclude: Any = None,
-    attempts: int = WAIT_ATTEMPTS,
-    pause: float = WAIT_PAUSE,
+    settings: Settings | None = None,
 ) -> dict | None:
-    """Подождать, пока фоновый сервис вернёт хотя бы один готовый набор."""
-    for attempt in range(1, attempts + 1):
-        chosen = next_cookie(exclude)
-        if chosen:
-            return chosen
-        logger.info(f"Пул без готовых cookies, жду сервис ({attempt}/{attempts})")
-        time.sleep(pause)
-    return None
+    """Вернуть готовый набор. Если рабочих нет — сразу докупить, без паузы."""
+    chosen = next_cookie(exclude)
+    if chosen:
+        return chosen
+    if settings is None:
+        return None
+    try:
+        replenish_if_empty(settings)
+    except Exception as err:
+        logger.error(f"Не удалось докупить cookies: {err}")
+        return None
+    return next_cookie(exclude)
 
 
 def maintain(settings: Settings) -> None:
     """Один круг обслуживания: докупить, разблокировать, добить до размера."""
     ensure_pool(settings)
+    empty = not usable_slots()
     for slot in list_slots():
         if slot.get("status") == STATUS_DEAD:
             continue
         if slot.get("status") == STATUS_BLOCKED or not slot.get("unblock_ok"):
             unblock_one(slot, settings)
-            time.sleep(_BETWEEN_UNBLOCK_PAUSE)
-    if len(alive_slots()) < pool_size(settings):
+            if not empty:
+                time.sleep(_BETWEEN_UNBLOCK_PAUSE)
+    if len(alive_slots()) < pool_size(settings) or not usable_slots():
         ensure_pool(settings)

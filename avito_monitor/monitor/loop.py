@@ -49,21 +49,37 @@ class CycleResult:
 
 
 def _rotate_ip(settings: Settings, ring: CookieRing, reason: str) -> None:
-    """Сменить IP и забыть соединения: после смены они мертвы."""
+    """Сменить IP сразу, не дожидаясь, пока туннель поднимется."""
     logger.warning(reason)
     try:
-        change_ip(
-            settings.proxy_change_url, settings.proxy_string, wait_max=settings.ip_change_wait
-        )
+        change_ip(settings.proxy_change_url, settings.proxy_string, wait_max=0)
     except RuntimeError as err:
         logger.warning(f"Не удалось сменить IP: {err}")
     ring.reset_clients()
+
+
+def _recover_empty_pool(settings: Settings, ring: CookieRing, reason: str) -> tuple[dict | None, object]:
+    """Нет рабочих cookies — сразу сменить IP и докупить набор."""
+    from avito_monitor.cookies import pool
+
+    _rotate_ip(settings, ring, reason)
+    try:
+        pool.replenish_if_empty(settings)
+    except Exception as err:
+        logger.error(f"Не удалось докупить cookies: {err}")
+    if not ring.refresh():
+        return None, None
+    return ring.next()
 
 
 def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
     """Забрать выдачу Avito, восстанавливаясь после отказов."""
     result = CycleResult()
     slot, client = ring.next()
+    if slot is None or client is None:
+        slot, client = _recover_empty_pool(
+            settings, ring, "Нет рабочих cookies — сразу меняю IP и докупаю"
+        )
     if slot is None or client is None:
         logger.error("Нет готового cookie — не бью Avito заблокированным набором")
         return CycleResult(failed=True)
@@ -95,6 +111,10 @@ def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
             ring.burn(burned)
             logger.warning(f"{status}: cookie id={burned} сгорел, IP не меняю, беру другой набор")
             slot, client = ring.next()
+            if slot is None or client is None:
+                slot, client = _recover_empty_pool(
+                    settings, ring, "Все cookies сгорели — сразу меняю IP и докупаю"
+                )
             if slot is None or client is None:
                 logger.error("Пул не дал готовый набор после блокировки")
                 return CycleResult(status=status, failed=True, throttled=True)
@@ -266,7 +286,7 @@ def main() -> None:
     ring = CookieRing(settings)
     ready = ring.refresh()
     if not ready:
-        pool.wait_ready_cookie()
+        pool.wait_ready_cookie(settings=settings)
         ready = ring.refresh()
 
     logger.info(

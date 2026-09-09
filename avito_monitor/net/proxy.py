@@ -59,7 +59,10 @@ def change_ip(change_url: str, proxy_string: str = "", wait_max: float = 12.0) -
 
     logger.info(f"Новый IP: {_reported_ip(response) or 'ок'}")
 
-    deadline = started + max(1.0, wait_max)
+    if wait_max <= 0:
+        return
+
+    deadline = started + wait_max
     while time.time() < deadline:
         if proxy_is_live(proxy_string):
             logger.info(f"Прокси готов через {time.time() - started:.1f} с")

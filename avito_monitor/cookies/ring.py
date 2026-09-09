@@ -126,9 +126,7 @@ class CookieRing:
         if not self._order or stale:
             self.refresh()
         if not self._order:
-            pool.wait_ready_cookie()
-            if not self.refresh():
-                return None, None
+            return None, None
 
         key = self._order[self._index % len(self._order)]
         self._index = (self._index + 1) % len(self._order)
