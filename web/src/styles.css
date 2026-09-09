@@ -2679,6 +2679,11 @@ body.auth-gate {
   min-height: 100dvh;
 }
 
+body.auth-gate .site-header,
+body.auth-gate .user-drawer-back {
+  display: none;
+}
+
 body.auth-gate .auth-screen {
   display: flex;
   flex: 1 1 auto;
@@ -2686,7 +2691,8 @@ body.auth-gate .auth-screen {
   justify-content: center;
   width: 100%;
   min-height: 0;
-  padding: 1.5rem 1rem 2rem;
+  padding: max(1.5rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right))
+    max(2rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
 }
 
 body.auth-gate .auth-screen.hidden {
@@ -2705,14 +2711,7 @@ body.auth-gate .auth-screen-card {
     inset: 0;
     z-index: 10;
     flex: none;
-    padding: calc(4rem + env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right))
-      max(1.5rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
     align-items: center;
     justify-content: center;
-  }
-
-  body.auth-gate .site-header {
-    position: relative;
-    z-index: 20;
   }
 }
