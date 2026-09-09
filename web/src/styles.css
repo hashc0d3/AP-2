@@ -816,6 +816,7 @@ body.lightbox-open {
   border-radius: 0.5rem;
   box-shadow: 0 1rem 3rem rgb(0 0 0 / 0.45);
   user-select: none;
+  cursor: zoom-out;
 }
 
 .image-lightbox-close {
@@ -840,60 +841,6 @@ body.lightbox-open {
 
 .image-lightbox-close:hover {
   background: rgb(0 0 0 / 0.75);
-}
-
-.image-lightbox-nav {
-  position: absolute;
-  top: 50%;
-  z-index: 2;
-  display: grid;
-  place-items: center;
-  width: 2.5rem;
-  height: 2.5rem;
-  margin: 0;
-  padding: 0;
-  border: 1px solid color-mix(in srgb, var(--color-body) 20%, transparent);
-  border-radius: 9999px;
-  background: rgb(0 0 0 / 0.55);
-  color: var(--color-body);
-  font-size: 1.75rem;
-  line-height: 1;
-  transform: translateY(-50%);
-  cursor: pointer;
-}
-
-.image-lightbox-nav:hover:not(:disabled) {
-  background: rgb(0 0 0 / 0.75);
-}
-
-.image-lightbox-nav:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
-.image-lightbox-nav.prev {
-  left: -0.5rem;
-}
-
-.image-lightbox-nav.next {
-  right: -0.5rem;
-}
-
-.image-lightbox-counter {
-  margin: 0.75rem 0 0;
-  font-size: 0.8125rem;
-  color: var(--color-muted);
-  text-align: center;
-}
-
-@media (max-width: 640px) {
-  .image-lightbox-nav.prev {
-    left: 0.25rem;
-  }
-
-  .image-lightbox-nav.next {
-    right: 0.25rem;
-  }
 }
 
 .filters-shell {

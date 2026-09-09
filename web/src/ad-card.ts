@@ -74,8 +74,8 @@ function cardHtml(ad: Ad, view: { hideImages: boolean; timeZone: string }): stri
   const title = escapeHtml(ad.title || "");
 
   return `<article class="card${fav ? " is-fav" : ""}${view.hideImages ? " card--no-media" : ""}" data-id="${escapeHtml(String(ad.id))}"${
-    ad.seller ? ` data-seller="${escapeHtml(ad.seller)}"` : ""
-  }>
+    ad.ts ? ` data-ts="${ad.ts}"` : ""
+  }${ad.seller ? ` data-seller="${escapeHtml(ad.seller)}"` : ""}">
       ${view.hideImages ? "" : mediaHtml(ad)}
       <div class="card-body">
         <div class="card-price-block">
@@ -101,7 +101,7 @@ function mediaHtml(ad: Ad): string {
   if (!photo) {
     return '<div class="card-media"><div class="ph">нет фото</div></div>';
   }
-  return `<button type="button" class="card-media" data-action="zoom-photo" aria-label="Открыть фото">
+  return `<button type="button" class="card-media" data-action="zoom-photo" aria-label="Увеличить фото">
       <img src="${imgSrc(photo)}" alt="" loading="lazy" />
     </button>`;
 }
@@ -176,8 +176,8 @@ function bindActions(
 
   action("zoom-photo")?.addEventListener("click", (ev) => {
     stop(ev);
-    const photos = ad.images?.filter(Boolean) || [];
-    if (photos.length) openImageLightbox(photos);
+    const photo = ad.images?.find(Boolean);
+    if (photo) openImageLightbox(photo);
   });
 
   const blockBtn = action("block-seller");

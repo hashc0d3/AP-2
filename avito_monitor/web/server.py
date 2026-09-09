@@ -398,6 +398,7 @@ def start_server(settings: Settings) -> QuietServer:
 
     :raises RuntimeError: порт занят другой копией приложения.
     """
+    FEED.set_max_age(settings.max_age)
     FEED.load_from_disk()
     host = os.environ.get("WEB_HOST", "127.0.0.1")
     port = settings.web_port

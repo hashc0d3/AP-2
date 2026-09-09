@@ -19,6 +19,9 @@ const POLL_INTERVAL_MS = 4000;
 /** Как часто пересчитывать «сколько назад» в карточках. */
 const CLOCK_INTERVAL_MS = 1000;
 
+/** Совпадает с `max_age` в config.toml: старше этого в ленте не держим. */
+const MAX_AGE_SEC = 300;
+
 const EMPTY_TEXT = "Жду новые объявления…";
 
 export type AdFeed = {
@@ -84,6 +87,23 @@ export function createAdFeed(opts: {
     syncEmptyClass();
   };
 
+  const showEmpty = (): void => {
+    if (opts.feed.querySelector(".card") || opts.feed.querySelector(".empty")) return;
+    opts.feed.innerHTML = `<div class="empty">${EMPTY_TEXT}</div>`;
+  };
+
+  const purgeStale = (): void => {
+    const now = Date.now() / 1000;
+    opts.feed.querySelectorAll<HTMLElement>(".card[data-ts]").forEach((card) => {
+      const ts = Number(card.dataset.ts);
+      if (!ts || now - ts <= MAX_AGE_SEC) return;
+      if (card.dataset.id) shown.delete(card.dataset.id);
+      card.remove();
+    });
+    showEmpty();
+    syncEmptyClass();
+  };
+
   const purgeBlacklisted = (): void => {
     opts.feed.querySelectorAll<HTMLElement>(".card").forEach((card) => {
       const seller = card.dataset.seller || "";
@@ -105,7 +125,10 @@ export function createAdFeed(opts: {
         .then((ads) => add(ads, false))
         .catch(() => undefined);
     }, POLL_INTERVAL_MS);
-    window.setInterval(opts.cards.refreshTimes, CLOCK_INTERVAL_MS);
+    window.setInterval(() => {
+      opts.cards.refreshTimes();
+      purgeStale();
+    }, CLOCK_INTERVAL_MS);
   };
 
   const connect = (): void => {
