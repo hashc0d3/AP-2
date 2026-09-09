@@ -93,7 +93,7 @@ def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
             result.throttled = True
             burned = slot.get("id")
             ring.burn(burned)
-            _rotate_ip(settings, ring, f"{status}: cookie id={burned} сгорел, беру другой набор")
+            logger.warning(f"{status}: cookie id={burned} сгорел, IP не меняю, беру другой набор")
             slot, client = ring.next()
             if slot is None or client is None:
                 logger.error("Пул не дал готовый набор после блокировки")
