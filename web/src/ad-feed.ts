@@ -22,13 +22,16 @@ const CLOCK_INTERVAL_MS = 1000;
 /** Совпадает с `max_age` в config.toml: старше этого в ленте не держим. */
 const MAX_AGE_SEC = 300;
 
-const EMPTY_TEXT = "Жду новые объявления…";
+const IDLE_TEXT = "Настройте фильтр для поиска";
+const SEARCHING_TEXT = "Идет поиск";
 
 export type AdFeed = {
   /** Добавить объявления. `fresh` — пришли только что, а не опросом. */
   add: (ads: Ad[], fresh: boolean) => void;
   /** Очистить ленту (новый поиск). */
-  clear: (message?: string) => void;
+  clear: () => void;
+  /** Обновить заглушку: простой поиск или «Идет поиск» с точками. */
+  syncEmpty: () => void;
   /** Убрать карточки продавцов, попавших в чёрный список. */
   purgeBlacklisted: () => void;
   /** Открыть поток событий и запустить запасной опрос. */
@@ -50,6 +53,34 @@ export function createAdFeed(opts: {
     opts.feed.classList.toggle("feed-empty", shown.size === 0);
   };
 
+  const hasCards = (): boolean => Boolean(opts.feed.querySelector(".card"));
+
+  const emptyMarkup = (searching: boolean): string => {
+    if (!searching) {
+      return `<div class="empty">${IDLE_TEXT}</div>`;
+    }
+    return `<div class="empty empty--searching" role="status" aria-label="${SEARCHING_TEXT}">${SEARCHING_TEXT}<span class="empty-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></div>`;
+  };
+
+  const renderEmpty = (): void => {
+    opts.feed.innerHTML = emptyMarkup(opts.isMonitoring());
+    syncEmptyClass();
+  };
+
+  const syncEmpty = (): void => {
+    if (hasCards()) {
+      syncEmptyClass();
+      return;
+    }
+    const searching = opts.isMonitoring();
+    const current = opts.feed.querySelector(".empty");
+    if (current && current.classList.contains("empty--searching") === searching) {
+      syncEmptyClass();
+      return;
+    }
+    renderEmpty();
+  };
+
   const mount = (ad: Ad, fresh: boolean): HTMLElement | null => {
     const id = String(ad.id);
     if (shown.has(id)) return null;
@@ -62,7 +93,7 @@ export function createAdFeed(opts: {
 
   const add = (ads: Ad[], fresh: boolean): void => {
     if (!Array.isArray(ads) || !ads.length) {
-      syncEmptyClass();
+      syncEmpty();
       return;
     }
     opts.feed.querySelector(".empty")?.remove();
@@ -78,18 +109,12 @@ export function createAdFeed(opts: {
     if (fresh && added.length && opts.isPushEnabled()) {
       notifyNewAds(added);
     }
-    syncEmptyClass();
+    syncEmpty();
   };
 
-  const clear = (message?: string): void => {
+  const clear = (): void => {
     shown.clear();
-    opts.feed.innerHTML = `<div class="empty">${message || EMPTY_TEXT}</div>`;
-    syncEmptyClass();
-  };
-
-  const showEmpty = (): void => {
-    if (opts.feed.querySelector(".card") || opts.feed.querySelector(".empty")) return;
-    opts.feed.innerHTML = `<div class="empty">${EMPTY_TEXT}</div>`;
+    renderEmpty();
   };
 
   const purgeStale = (): void => {
@@ -100,8 +125,7 @@ export function createAdFeed(opts: {
       if (card.dataset.id) shown.delete(card.dataset.id);
       card.remove();
     });
-    showEmpty();
-    syncEmptyClass();
+    syncEmpty();
   };
 
   const purgeBlacklisted = (): void => {
@@ -113,7 +137,7 @@ export function createAdFeed(opts: {
       if (card.dataset.id) shown.delete(card.dataset.id);
       card.remove();
     });
-    syncEmptyClass();
+    syncEmpty();
   };
 
   const start = (): void => {
@@ -145,5 +169,5 @@ export function createAdFeed(opts: {
     events.onerror = () => opts.onReconnecting();
   };
 
-  return { add, clear, purgeBlacklisted, start };
+  return { add, clear, syncEmpty, purgeBlacklisted, start };
 }

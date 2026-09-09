@@ -289,6 +289,7 @@ export function mountMonitor(
     monitoring = on;
     syncSearchControls();
     syncSearchStatus();
+    feed.syncEmpty();
   };
 
   const setStarting = (value: boolean): void => {

@@ -1660,6 +1660,28 @@ a.card-btn {
   min-width: 0;
 }
 
+.empty-dots {
+  display: inline-block;
+  overflow: hidden;
+  white-space: nowrap;
+  vertical-align: bottom;
+  width: 0;
+  animation: empty-dots 1.4s steps(4, end) infinite;
+}
+
+@keyframes empty-dots {
+  to {
+    width: 1.2em;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .empty-dots {
+    animation: none;
+    width: 1.2em;
+  }
+}
+
 @media (max-width: 639px) {
   .tab {
     @apply px-2.5 py-1.5 text-xs;
