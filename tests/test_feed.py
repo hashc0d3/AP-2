@@ -63,8 +63,8 @@ def test_empty_publish_does_nothing(fresh_feed: AdFeed) -> None:
     assert fresh_feed.publish([]) == []
 
 
-def test_feed_keeps_only_recent_ads(fresh_feed: AdFeed) -> None:
-    """В выдаче только объявления за последние 5 минут (max_age)."""
+def test_feed_keeps_old_published_ads_until_sweep(fresh_feed: AdFeed) -> None:
+    """Возраст на Avito больше не выкидывает карточку из ленты сразу."""
     now = time.time()
     fresh_feed.publish(
         [
@@ -72,21 +72,41 @@ def test_feed_keeps_only_recent_ads(fresh_feed: AdFeed) -> None:
             {"id": 2, "title": "старое", "ts": now - 400},
         ]
     )
+    assert [ad["id"] for ad in fresh_feed.snapshot()] == [1, 2]
+
+
+def test_sweep_keeps_ads_received_in_last_20_minutes(fresh_feed: AdFeed) -> None:
+    now = time.time()
+    fresh_feed.publish([{"id": 1, "title": "свежее"}, {"id": 2, "title": "старое"}])
+    fresh_feed._ads[1]["received_at"] = now - 21 * 60
+    assert fresh_feed.sweep(keep_seconds=feed.KEEP_RECENT_SEC) == 1
     assert [ad["id"] for ad in fresh_feed.snapshot()] == [1]
 
 
-def test_feed_drops_ads_after_they_age(fresh_feed: AdFeed) -> None:
+def test_snapshot_hides_ads_older_than_20_minutes(fresh_feed: AdFeed) -> None:
     now = time.time()
-    fresh_feed.publish([{"id": 1, "title": "было свежим", "ts": now - 299}])
-    assert len(fresh_feed.snapshot()) == 1
-    fresh_feed._ads[0]["ts"] = now - 400
-    assert fresh_feed.snapshot() == []
+    fresh_feed.publish([{"id": 1, "title": "свежее"}, {"id": 2, "title": "старое"}])
+    fresh_feed._ads[1]["received_at"] = now - 21 * 60
+    assert [ad["id"] for ad in fresh_feed.snapshot()] == [1]
 
 
-def test_feed_without_age_limit_keeps_old_ads() -> None:
-    store = AdFeed(max_age=0)
-    store.publish([{"id": 1, "title": "старое", "ts": 1}])
-    assert [ad["id"] for ad in store.snapshot()] == [1]
+def test_sweep_does_nothing_when_all_recent(fresh_feed: AdFeed) -> None:
+    fresh_feed.publish([{"id": 1}])
+    assert fresh_feed.sweep(keep_seconds=feed.KEEP_RECENT_SEC) == 0
+    assert [ad["id"] for ad in fresh_feed.snapshot()] == [1]
+
+
+def test_sweep_notifies_reset_and_remaining(fresh_feed: AdFeed) -> None:
+    with fresh_feed.subscription() as listener:
+        fresh_feed.publish([{"id": 1}])
+        listener.get(timeout=1)
+        fresh_feed._ads[0]["received_at"] = time.time() - 21 * 60
+        fresh_feed.publish([{"id": 2}])
+        listener.get(timeout=1)
+        fresh_feed.sweep(keep_seconds=feed.KEEP_RECENT_SEC)
+        assert listener.get(timeout=1) == feed.RESET_EVENT
+        remaining = listener.get(timeout=1)
+        assert [ad["id"] for ad in remaining] == [2]
 
 
 # ── Диск ───────────────────────────────────────────────────────────────────
@@ -100,7 +120,7 @@ def test_feed_survives_restart(fresh_feed: AdFeed) -> None:
     assert [ad["id"] for ad in restarted.snapshot()] == [1, 2]
 
 
-def test_stale_ads_are_dropped_on_load(fresh_feed: AdFeed) -> None:
+def test_ads_survive_load_even_if_published_long_ago(fresh_feed: AdFeed) -> None:
     now = time.time()
     fresh_feed.publish(
         [
@@ -110,11 +130,13 @@ def test_stale_ads_are_dropped_on_load(fresh_feed: AdFeed) -> None:
     )
     stored = json.loads(feed.ADS_PATH.read_text(encoding="utf-8"))
     stored[1]["ts"] = now - 400
+    del stored[1]["received_at"]
     feed.ADS_PATH.write_text(json.dumps(stored), encoding="utf-8")
 
     restarted = AdFeed()
     restarted.load_from_disk()
-    assert [ad["id"] for ad in restarted.snapshot()] == [1]
+    assert [ad["id"] for ad in restarted.snapshot()] == [1, 2]
+    assert restarted.snapshot()[1]["received_at"]
 
 
 def test_missing_file_gives_empty_feed() -> None:

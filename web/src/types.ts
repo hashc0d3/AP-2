@@ -66,6 +66,8 @@ export type Ad = {
   published?: string;
   /** Unix-время публикации в секундах. */
   ts?: number;
+  /** Когда объявление попало в нашу ленту, unix-секунды. */
+  received_at?: number;
   description?: string;
   /** Одноразовый ключ Avito для запроса номера, если он был в карточке. */
   phone_key?: string;

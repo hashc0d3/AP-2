@@ -75,7 +75,7 @@ function cardHtml(ad: Ad, view: { hideImages: boolean; timeZone: string }): stri
 
   return `<article class="card${fav ? " is-fav" : ""}${view.hideImages ? " card--no-media" : ""}" data-id="${escapeHtml(String(ad.id))}"${
     ad.ts ? ` data-ts="${ad.ts}"` : ""
-  }${ad.seller ? ` data-seller="${escapeHtml(ad.seller)}"` : ""}">
+  }${ad.received_at ? ` data-received-at="${ad.received_at}"` : ""}${ad.seller ? ` data-seller="${escapeHtml(ad.seller)}"` : ""}">
       ${view.hideImages ? "" : mediaHtml(ad)}
       <div class="card-body">
         <div class="card-price-block">

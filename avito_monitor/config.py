@@ -50,7 +50,7 @@ class Settings:
     seller_skip: tuple[str, ...] = ()
     title_must_contain: tuple[str, ...] = ()
     title_skip: tuple[str, ...] = ()
-    max_age: int = 300
+    max_age: int = 1200
     """Максимальный возраст объявления в секундах; 0 — без ограничения."""
     notify_max_age: int = 0
     """Не показывать объявления старше N секунд на момент попадания в ленту."""
@@ -64,7 +64,7 @@ class Settings:
     """Модели уже зашиты в API URL, повторно фильтровать по названию не нужно."""
 
     # ── Пагинация ───────────────────────────────────────────────────────
-    pages: int = 1
+    pages: int = 2
     pause_between_pages: int = 2
 
     # ── Темп опроса ─────────────────────────────────────────────────────
@@ -76,8 +76,8 @@ class Settings:
     """Один набор cookies не бьёт Avito чаще, чем раз в столько секунд."""
     retry_pause: float = 12.0
     """Пауза после неудачного цикла."""
-    request_timeout: float = 10.0
-    ip_change_wait: float = 12.0
+    request_timeout: float = 20.0
+    ip_change_wait: float = 25.0
 
     # ── Пул cookies ─────────────────────────────────────────────────────
     cookie_pool_size: int = 5

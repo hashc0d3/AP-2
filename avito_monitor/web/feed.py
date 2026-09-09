@@ -6,6 +6,10 @@
 Новые объявления доходят до браузера двумя путями: основной — Server-Sent
 Events (открытое соединение ``/events``), запасной — опрос ``/api/ads``.
 Дубликаты отсекаются по ID, поэтому оба пути могут работать одновременно.
+
+Ленту подчищаем каждую минуту: оставляем объявления, полученные за
+последние 20 минут. В поиск по-прежнему попадают только свежие карточки
+Avito (``max_age`` в фильтрах, тоже 20 минут).
 """
 
 from __future__ import annotations
@@ -25,47 +29,35 @@ from avito_monitor.paths import ADS_PATH
 MAX_ADS = 200
 """Столько объявлений храним; более старые вытесняются, даже если ещё свежие."""
 
-DEFAULT_MAX_AGE = 300
-"""По умолчанию в ленте только объявления не старше 5 минут. ``0`` — без лимита."""
+SWEEP_INTERVAL_SEC = 60
+"""Как часто подчищаем ленту."""
+
+KEEP_RECENT_SEC = 20 * 60
+"""Оставляем объявления, полученные за последние 20 минут."""
 
 RESET_EVENT = {"reset": True}
 """Служебное сообщение подписчикам: ленту очистили."""
 
 
+def _received_at(ad: dict) -> float:
+    """Когда объявление попало в нашу ленту. Без метки считаем нулём."""
+    raw = ad.get("received_at")
+    if raw is None:
+        raw = ad.get("ts")
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 class AdFeed:
     """Потокобезопасная лента с подписчиками."""
 
-    def __init__(self, max_ads: int = MAX_ADS, max_age: int = DEFAULT_MAX_AGE) -> None:
+    def __init__(self, max_ads: int = MAX_ADS) -> None:
         self._max_ads = max_ads
-        self._max_age = max(0, max_age)
         self._lock = threading.Lock()
         self._ads: list[dict] = []
         self._listeners: list[queue.Queue] = []
-
-    def set_max_age(self, max_age: int) -> None:
-        """Подставить ``max_age`` из настроек. ``0`` — возраст не ограничиваем."""
-        with self._lock:
-            self._max_age = max(0, int(max_age))
-
-    def _fresh(self, ads: list[dict], now: float | None = None) -> list[dict]:
-        """Оставить объявления не старше лимита. Без ``ts`` не трогаем — тесты."""
-        if not self._max_age:
-            return list(ads)
-        moment = time.time() if now is None else now
-        kept: list[dict] = []
-        for ad in ads:
-            ts = ad.get("ts")
-            if ts is None or moment - float(ts) <= self._max_age:
-                kept.append(ad)
-        return kept
-
-    def _prune_locked(self) -> bool:
-        """Вызывать под ``self._lock``. ``True``, если что-то удалили."""
-        kept = self._fresh(self._ads)
-        if len(kept) == len(self._ads):
-            return False
-        self._ads = kept
-        return True
 
     def load_from_disk(self) -> None:
         """Прочитать сохранённую ленту. Битый файл считаем пустым."""
@@ -75,11 +67,13 @@ class AdFeed:
             data = json.loads(ADS_PATH.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             data = None
+        now = time.time()
         with self._lock:
             loaded = data[: self._max_ads] if isinstance(data, list) else []
-            self._ads = self._fresh(loaded)
-            if len(self._ads) != len(loaded):
-                self._save_to_disk()
+            for ad in loaded:
+                if isinstance(ad, dict) and ad.get("received_at") is None:
+                    ad["received_at"] = now
+            self._ads = loaded
 
     def _save_to_disk(self) -> None:
         """Вызывать под ``self._lock``."""
@@ -87,28 +81,36 @@ class AdFeed:
         ADS_PATH.write_text(json.dumps(self._ads, ensure_ascii=False), encoding="utf-8")
 
     def snapshot(self) -> list[dict]:
-        """Текущая лента, свежие объявления первыми. Старше лимита выкидываем."""
+        """Текущая лента, свежие объявления первыми.
+
+        Карточки старше ``KEEP_RECENT_SEC`` с момента попадания к нам
+        уже не отдаём — иначе опрос ``/api/ads`` вернул бы их обратно.
+        """
+        cutoff = time.time() - KEEP_RECENT_SEC
         with self._lock:
-            if self._prune_locked():
-                self._save_to_disk()
-            return list(self._ads)
+            return [ad for ad in self._ads if _received_at(ad) >= cutoff]
 
     def publish(self, ads: list[dict]) -> list[dict]:
         """Добавить объявления в ленту и разослать подписчикам.
 
-        Возвращает те, которых в ленте ещё не было. Старше ``max_age``
-        не принимаем и заодно вычищаем уже лежащие.
+        Возвращает те, которых в ленте ещё не было. Помечаем ``received_at``,
+        чтобы плановая чистка оставляла только свежеполученные.
         """
         if not ads:
             return []
+        now = time.time()
         with self._lock:
-            pruned = self._prune_locked()
             known = {item.get("id") for item in self._ads}
-            incoming = self._fresh([ad for ad in ads if ad.get("id") not in known])
+            incoming = []
+            for ad in ads:
+                if ad.get("id") in known:
+                    continue
+                stamped = dict(ad)
+                stamped["received_at"] = now
+                incoming.append(stamped)
             if incoming:
                 self._ads[0:0] = incoming
                 del self._ads[self._max_ads :]
-            if incoming or pruned:
                 self._save_to_disk()
             if not incoming:
                 return []
@@ -118,6 +120,29 @@ class AdFeed:
             listener.put(incoming)
         logger.info(f"В веб-ленту добавлено {len(incoming)} объявлений")
         return incoming
+
+    def sweep(self, keep_seconds: int = KEEP_RECENT_SEC) -> int:
+        """Убрать всё, кроме объявлений, полученных за ``keep_seconds``.
+
+        Браузерам шлём ``reset`` и оставшийся хвост, чтобы лента не вспыхнула
+        пустой на несколько секунд до следующего опроса.
+        """
+        cutoff = time.time() - max(0, keep_seconds)
+        with self._lock:
+            kept = [ad for ad in self._ads if _received_at(ad) >= cutoff]
+            removed = len(self._ads) - len(kept)
+            if removed == 0:
+                return 0
+            self._ads = kept
+            self._save_to_disk()
+            listeners = list(self._listeners)
+
+        for listener in listeners:
+            listener.put(dict(RESET_EVENT))
+            if kept:
+                listener.put(list(kept))
+        logger.info(f"Плановая чистка ленты: убрано {removed}, осталось {len(kept)}")
+        return removed
 
     def clear(self) -> int:
         """Очистить ленту. Возвращает число удалённых объявлений."""
@@ -175,3 +200,18 @@ def clear_ads() -> int:
 
 def snapshot_ads() -> list[dict]:
     return FEED.snapshot()
+
+
+def start_sweeper(store: AdFeed | None = None) -> None:
+    """Фоновая чистка ленты раз в минуту."""
+    target = store if store is not None else FEED
+
+    def loop() -> None:
+        while True:
+            time.sleep(SWEEP_INTERVAL_SEC)
+            try:
+                target.sweep(KEEP_RECENT_SEC)
+            except Exception:
+                logger.exception("Плановая чистка ленты не удалась")
+
+    threading.Thread(target=loop, name="feed-sweeper", daemon=True).start()

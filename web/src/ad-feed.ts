@@ -16,11 +16,11 @@ import type { Ad } from "./types";
 /** Запасной опрос: реже — можно пропустить объявление, чаще — лишняя нагрузка. */
 const POLL_INTERVAL_MS = 4000;
 
+/** Карточка живёт в ленте 20 минут с момента, как попала к нам. */
+const FEED_KEEP_SEC = 20 * 60;
+
 /** Как часто пересчитывать «сколько назад» в карточках. */
 const CLOCK_INTERVAL_MS = 1000;
-
-/** Совпадает с `max_age` в config.toml: старше этого в ленте не держим. */
-const MAX_AGE_SEC = 300;
 
 const IDLE_TEXT = "Настройте фильтр для поиска";
 const SEARCHING_TEXT = "Идет поиск";
@@ -88,7 +88,11 @@ export function createAdFeed(opts: {
     // приходить снова каждым опросом.
     shown.add(id);
     if (ad.seller && sellerMatchesBlacklist(ad.seller)) return null;
-    return opts.cards.create(ad, fresh);
+    const card = opts.cards.create(ad, fresh);
+    if (!card.dataset.receivedAt) {
+      card.dataset.receivedAt = String(ad.received_at || Date.now() / 1000);
+    }
+    return card;
   };
 
   const add = (ads: Ad[], fresh: boolean): void => {
@@ -117,11 +121,11 @@ export function createAdFeed(opts: {
     renderEmpty();
   };
 
-  const purgeStale = (): void => {
-    const now = Date.now() / 1000;
-    opts.feed.querySelectorAll<HTMLElement>(".card[data-ts]").forEach((card) => {
-      const ts = Number(card.dataset.ts);
-      if (!ts || now - ts <= MAX_AGE_SEC) return;
+  const purgeExpired = (): void => {
+    const cutoff = Date.now() / 1000 - FEED_KEEP_SEC;
+    opts.feed.querySelectorAll<HTMLElement>(".card").forEach((card) => {
+      const received = Number(card.dataset.receivedAt);
+      if (!received || received >= cutoff) return;
       if (card.dataset.id) shown.delete(card.dataset.id);
       card.remove();
     });
@@ -151,7 +155,7 @@ export function createAdFeed(opts: {
     }, POLL_INTERVAL_MS);
     window.setInterval(() => {
       opts.cards.refreshTimes();
-      purgeStale();
+      purgeExpired();
     }, CLOCK_INTERVAL_MS);
   };
 
