@@ -39,6 +39,40 @@ def test_extract_phone_ignores_scheme_version_in_uri() -> None:
     assert phone.extract_phone(payload) == "+79161234567"
 
 
+def test_extract_phone_from_integer_field() -> None:
+    assert phone.extract_phone({"phone": 79001112233}) == "+79001112233"
+
+
+def test_extract_phone_from_contacts_value() -> None:
+    payload = {
+        "status": "ok",
+        "result": {
+            "contacts": {
+                "phone": {
+                    "value": "8 958 111-22-33",
+                    "anonymous": True,
+                    "title": "Временный номер",
+                }
+            }
+        },
+    }
+    assert phone.extract_phone(payload) == "+79581112233"
+
+
+def test_extract_phone_from_params_number_in_uri() -> None:
+    payload = {
+        "result": {
+            "action": {"uri": "ru.avito://1/call?params[number]=%2B79581112233"},
+        }
+    }
+    assert phone.extract_phone(payload) == "+79581112233"
+
+
+def test_extract_phone_skips_image_only_payload() -> None:
+    payload = {"status": "ok", "result": {"anonymImage64": "iVBORw0KGgoAAA"}}
+    assert phone.extract_phone(payload) is None
+
+
 def test_extract_phone_normalizes_eight() -> None:
     assert phone.extract_phone({"phone": "89001112233"}) == "+79001112233"
 
@@ -73,7 +107,7 @@ def test_fetch_phone_uses_supplied_key_first(monkeypatch) -> None:
     monkeypatch.setattr(phone, "_get", fake_get)
     result = phone.fetch_phone(_Client(), 1, phone_key="abc")
     assert result["ok"] is True
-    assert seen[0] == {"key": "abc"}
+    assert seen[0] == {"key": "abc", "pkey": "abc"}
 
 
 def test_fetch_phone_rejects_non_numeric_id() -> None:

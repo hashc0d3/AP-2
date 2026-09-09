@@ -41,6 +41,8 @@ export type AvitoPhoneResult = {
   error?: string;
   /** Причина отказа: no_session, not_logged_in, auth_required. */
   code?: string;
+  /** Имена полей ответа Avito, если номер не разобрали. */
+  fields?: string[];
 };
 
 /** Баланс сервиса cookies. */

@@ -18,9 +18,13 @@ from loguru import logger
 
 PHONE_URLS = (
     "https://m.avito.ru/api/1/items/{id}/phone",
+    "https://m.avito.ru/api/1/items/{id}/phone/anonymous",
     "https://www.avito.ru/web/1/items/phone/{id}",
+    "https://www.avito.ru/api/1/items/{id}/phone",
 )
 ITEM_URLS = (
+    "https://m.avito.ru/api/15/items/{id}",
+    "https://www.avito.ru/web/1/item/{id}",
     "https://www.avito.ru/web/1/main/items/{id}",
     "https://m.avito.ru/api/1/items/{id}",
 )
@@ -40,7 +44,31 @@ _AUTH_MARKERS = (
     "user_unauthorized",
 )
 _PHONE_KEY_NAMES = frozenset({"phonekey", "phone_key", "buyerphonekey", "pkey"})
-_PHONE_FIELD_NAMES = frozenset({"phone", "phonenumber", "number", "uri", "value", "tel"})
+_PHONE_FIELD_NAMES = frozenset(
+    {
+        "phone",
+        "phonenumber",
+        "number",
+        "uri",
+        "value",
+        "tel",
+        "msisdn",
+        "mobile",
+        "formatted",
+        "display",
+        "anonymousphone",
+        "substitutionphone",
+        "virtualphone",
+        "tmpphone",
+        "temporaryphone",
+        "protectphone",
+        "buyerphone",
+    }
+)
+_PHONE_FIELD_HINT = re.compile(
+    r"phone|tel|msisdn|mobile|номер|anonym",
+    re.IGNORECASE,
+)
 
 _PHONE_KEY_PATTERNS = (
     r'"phoneKey"\s*:\s*"([^"]+)"',
@@ -50,82 +78,111 @@ _PHONE_KEY_PATTERNS = (
 )
 _DIGITS = re.compile(r"\d+")
 _URI_PHONE_RE = re.compile(
-    r"(?:tel:|(?:^|[?&#])number=)(\+?[\d\s\-()]{8,})",
+    r"(?:tel:|(?<![A-Za-z])(?:number|phone|msisdn)\]?=)(\+?[\d\s\-()]{8,})",
     re.IGNORECASE,
 )
+_FAKE_PHONE = re.compile(r"^(?:7|8)?(?:0{10}|1{10}|2{10}|3{10}|4{10}|5{10}|6{10}|7{10}|8{10}|9{10})$")
 
 
-def _digits_to_e164(raw: str) -> str | None:
+def _digits_to_e164(raw: str, *, allow_local: bool = False) -> str | None:
     digits = "".join(_DIGITS.findall(raw))
+    if _FAKE_PHONE.match(digits):
+        return None
     if len(digits) == 11 and digits[0] in "78":
         return "+7" + digits[1:]
-    if len(digits) == 10:
+    if allow_local and len(digits) == 10:
         return "+7" + digits
-    if 11 <= len(digits) <= 15:
+    if 11 <= len(digits) <= 15 and digits[0] != "1":
         return "+" + digits
     return None
 
 
-def _normalize_number(raw: str) -> str | None:
+def _normalize_number(raw: str, *, field: str = "") -> str | None:
     """Свести строку Avito к ``+7…``. Мусор и короткие куски отбрасываем.
 
     В ``action.uri`` номер лежит в ``tel:`` / ``number=``. Нельзя собирать
     все цифры из URI: версия схемы ``://1/`` прилипает слева и даёт ``+1…``.
+    Временный номер часто приходит полем ``phone`` / ``value``, не ``tel:``.
     """
-    text = unquote(raw or "").strip()
+    text = unquote(str(raw or "")).strip()
     if not text:
         return None
     match = _URI_PHONE_RE.search(text)
     if match:
-        return _digits_to_e164(match.group(1))
+        return _digits_to_e164(match.group(1), allow_local=True)
     if "://" in text:
         return None
-    return _digits_to_e164(text)
+    explicit = field.lower() in _PHONE_FIELD_NAMES or bool(_PHONE_FIELD_HINT.search(field))
+    return _digits_to_e164(text, allow_local=explicit)
 
 
-def _walk_for_phone(node: Any, field: str = "") -> str | None:
-    if isinstance(node, str):
-        lowered = field.lower()
-        if (
-            lowered in _PHONE_FIELD_NAMES
-            or "tel:" in node.lower()
-            or "number=" in node.lower()
-        ):
-            return _normalize_number(node)
-        return None
+def _collect_phones(node: Any, field: str = "", found: list[str] | None = None) -> list[str]:
+    """Все похожие на телефон значения из ответа — звоним по первому живому."""
+    found = found if found is not None else []
     if isinstance(node, dict):
         for key, value in node.items():
-            found = _walk_for_phone(value, str(key))
-            if found:
-                return found
-    elif isinstance(node, list):
+            _collect_phones(value, str(key), found)
+        return found
+    if isinstance(node, list):
         for item in node:
-            found = _walk_for_phone(item, field)
-            if found:
-                return found
-    return None
+            _collect_phones(item, field, found)
+        return found
+    if isinstance(node, bool) or node is None:
+        return found
+    if isinstance(node, (int, float)):
+        number = _normalize_number(str(int(node)), field=field)
+        if number and number not in found:
+            found.append(number)
+        return found
+    if not isinstance(node, str):
+        return found
+    lowered = field.lower()
+    if (
+        lowered in _PHONE_FIELD_NAMES
+        or _PHONE_FIELD_HINT.search(field)
+        or "tel:" in node.lower()
+        or "number=" in node.lower()
+        or "phone=" in node.lower()
+    ):
+        number = _normalize_number(node, field=field)
+        if number and number not in found:
+            found.append(number)
+    return found
+
+
+def _pick_phone(candidates: list[str]) -> str | None:
+    if not candidates:
+        return None
+
+    def score(phone: str) -> tuple[int, int, int]:
+        digits = "".join(_DIGITS.findall(phone))
+        pool = int(digits.startswith(("7958", "7495", "7499", "7800")))
+        mobile = int(digits.startswith("79"))
+        return (pool, mobile, len(digits))
+
+    return max(candidates, key=score)
 
 
 def extract_phone(payload: dict | str) -> str | None:
-    """Найти номер в ответе Avito — в JSON или в HTML."""
+    """Найти любой звонибельный номер в ответе Avito — в JSON или в HTML."""
     if isinstance(payload, dict):
-        found = _walk_for_phone(payload)
-        if found:
-            return found
+        picked = _pick_phone(_collect_phones(payload))
+        if picked:
+            return picked
         text = json.dumps(payload, ensure_ascii=False)
     else:
         text = payload or ""
+    found: list[str] = []
     for pattern in (
-        r"number=%2B(\d+)",
-        r"number=\+?(\d+)",
+        r"(?:number|phone|msisdn)\]?=%2B(\d+)",
+        r"(?:number|phone|msisdn)\]?=\+?(\d+)",
         r"tel:(\+?\d[\d\s\-()]{8,})",
     ):
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            number = _normalize_number(match.group(1))
-            if number:
-                return number
-    return None
+        for match in re.finditer(pattern, text, re.IGNORECASE):
+            number = _normalize_number(match.group(1), field="tel")
+            if number and number not in found:
+                found.append(number)
+    return _pick_phone(found)
 
 
 def find_phone_key(payload: dict | str) -> str | None:
@@ -175,6 +232,26 @@ def needs_auth(payload: Any) -> bool:
 def _preview(payload: Any) -> str:
     text = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
     return text.replace("\n", " ")[:240]
+
+
+def _payload_fields(payload: Any, prefix: str = "", out: list[str] | None = None) -> list[str]:
+    """Имена полей ответа без значений — чтобы понять, что отдал Avito."""
+    out = out if out is not None else []
+    if len(out) >= 48:
+        return out
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            path = f"{prefix}.{key}" if prefix else str(key)
+            if isinstance(value, (dict, list)):
+                out.append(path)
+                _payload_fields(value, path, out)
+            else:
+                out.append(path)
+        return out
+    if isinstance(payload, list):
+        for index, item in enumerate(payload[:6]):
+            _payload_fields(item, f"{prefix}[{index}]", out)
+    return out
 
 
 def _avito_message(payload: Any) -> str:
@@ -234,6 +311,7 @@ def fetch_phone(
     client.headers.setdefault("accept", "application/json, text/plain, */*")
     known_key = (phone_key or "").strip() or None
     last_message = ""
+    last_fields: list[str] = []
 
     attempts: list[str | None] = []
     if known_key:
@@ -247,6 +325,7 @@ def fetch_phone(
         if result.get("ok"):
             return result
         last_message = str(result.get("error") or last_message)
+        last_fields = list(result.get("fields") or last_fields)
         if result.get("code") in {"blocked", "auth_required"}:
             return result
 
@@ -257,6 +336,7 @@ def fetch_phone(
             if result.get("ok") or result.get("code") in {"blocked", "auth_required"}:
                 return result
             last_message = str(result.get("error") or last_message)
+            last_fields = list(result.get("fields") or last_fields)
 
     _, page = _get(client, CARD_URL.format(id=ad_id))
     if page:
@@ -267,13 +347,21 @@ def fetch_phone(
                 if result.get("ok") or result.get("code") in {"blocked", "auth_required"}:
                     return result
                 last_message = str(result.get("error") or last_message)
+                last_fields = list(result.get("fields") or last_fields)
 
-    logger.info(f"Номер ad={ad_id} не разобран: {last_message or 'пустой ответ Avito'}")
-    return {
+    logger.info(
+        f"Номер ad={ad_id} не разобран: {last_message or 'пустой ответ Avito'}"
+        + (f"; поля={last_fields}" if last_fields else "")
+    )
+    error = last_message or "Номер недоступен — скрыт продавцом или только сообщения"
+    result = {
         "ok": False,
-        "error": last_message or "Номер недоступен — скрыт продавцом или только сообщения",
+        "error": error,
         "code": "unavailable",
     }
+    if last_fields:
+        result["fields"] = last_fields
+    return result
 
 
 def _lookup_phone_key(client: curl_requests.Session, ad_id: str) -> str | None:
@@ -292,7 +380,7 @@ def _request_phone(
     phone_key: str | None,
 ) -> dict[str, Any] | None:
     """Пройти по эндпоинтам номера. ``None`` — ни один не помог."""
-    params = {"key": phone_key} if phone_key else {}
+    params = {"key": phone_key, "pkey": phone_key} if phone_key else {}
     last_error: dict[str, Any] | None = None
     for template in PHONE_URLS:
         url = template.format(id=ad_id)
@@ -305,6 +393,12 @@ def _request_phone(
                     "code": "blocked",
                 }
             continue
+        if status in _BLOCKED_STATUSES and not isinstance(payload, dict):
+            return {
+                "ok": False,
+                "error": "Avito ограничил запрос — обновите сессию или IP",
+                "code": "blocked",
+            }
         if needs_auth(payload):
             return {
                 "ok": False,
@@ -315,7 +409,13 @@ def _request_phone(
         if phone:
             return {"ok": True, "phone": phone}
         message = _avito_message(payload)
-        logger.debug(f"phone {url} http={status} {_preview(payload)}")
-        if message:
-            last_error = {"ok": False, "error": message, "code": "unavailable"}
+        fields = _payload_fields(payload) if isinstance(payload, dict) else []
+        logger.info(f"phone {url} http={status} fields={fields or '-'} {_preview(payload)}")
+        last_error = {
+            "ok": False,
+            "error": message,
+            "code": "unavailable",
+        }
+        if fields:
+            last_error["fields"] = fields
     return last_error

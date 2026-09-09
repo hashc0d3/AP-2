@@ -158,7 +158,11 @@ export function createAvitoSession(opts: {
         setConnected(false);
         open();
       } else {
-        window.alert(result.error || "Номер недоступен");
+        window.alert(
+          result.fields?.length
+            ? `${result.error || "Номер недоступен"}\n\nПоля Avito: ${result.fields.join(", ")}`
+            : result.error || "Номер недоступен",
+        );
       }
     } catch (err) {
       label.restore();
