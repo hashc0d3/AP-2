@@ -246,12 +246,14 @@ def test_selected_models_land_in_web_url() -> None:
     assert iphone_params.has_model_params(url) is True
 
 
-def test_all_models_selected_means_no_filter() -> None:
-    """Все модели — та же выдача, но без лишних параметров в ссылке."""
-    every_id = [model.id for model in iphone.all_models()]
-    url = _web_url_with_models(every_id)
-    assert f"params[{iphone_params.MODEL_PARAM_WEB}]" not in url
-    assert iphone_params.has_model_params(url) is False
+def test_all_models_selected_still_filters_from_11() -> None:
+    """«Все модели» — iPhone 11+, иначе Avito отдаёт XS и старше."""
+    every = list(iphone.all_models())
+    url = _web_url_with_models([model.id for model in every])
+    assert iphone_params.has_model_params(url) is True
+    assert str(every[0].avito_value) in url
+    assert str(every[-1].avito_value) in url
+    assert every[0].gen == 11
 
 
 def test_model_values_follow_selection_order() -> None:

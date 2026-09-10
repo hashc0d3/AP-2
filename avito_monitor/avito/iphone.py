@@ -227,7 +227,11 @@ def model_allowed(
 
 
 def is_full_selection(model_ids: tuple[str, ...] | list[str] | None) -> bool:
-    """Выбраны ли все модели каталога (тогда фильтр в ссылке не нужен)."""
+    """Выбраны ли все модели каталога (11 и новее).
+
+    Это не «любой iPhone на Avito»: без параметров в ссылке туда попадают
+    X, XS, SE и старше.
+    """
     if not model_ids:
         return True
     return set(model_ids) == _ids()

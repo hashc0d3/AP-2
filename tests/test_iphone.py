@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from avito_monitor.avito import iphone
+from avito_monitor.avito import iphone, iphone_params
 
 
 @pytest.mark.parametrize(
@@ -148,11 +148,12 @@ def test_normalize_passes_none_through() -> None:
     assert iphone.normalize_models(None) is None
 
 
-def test_full_selection_detected() -> None:
+def test_full_selection_still_has_avito_values() -> None:
+    """11+ уходит в ссылку, иначе Avito показывает XS и старше."""
     every_id = [model.id for model in iphone.all_models()]
-    assert iphone.is_full_selection(every_id) is True
-    assert iphone.is_full_selection(every_id[:-1]) is False
-    assert iphone.is_full_selection(None) is True
+    values = iphone_params.models_to_avito_values(every_id)
+    assert len(values) == len(every_id)
+    assert iphone.find_model("11").avito_value in values
 
 
 def test_catalog_is_consistent() -> None:

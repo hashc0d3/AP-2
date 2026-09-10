@@ -31,11 +31,11 @@ def _model_param(url: str) -> int:
 def models_to_avito_values(model_ids: tuple[str, ...] | list[str] | None) -> list[int]:
     """Коды моделей для ссылки Avito.
 
-    Пустой список — фильтр не нужен: либо моделей не задано, либо выбраны
-    все, и Avito отдаст ту же выдачу без лишних параметров.
+    Пустой список — фильтра нет. «Все модели» в интерфейсе — это каталог
+    с 11-й, не весь Apple на Avito: XS, SE и старше надо отсечь параметрами.
     """
     normalized = iphone.normalize_models(model_ids)
-    if not normalized or iphone.is_full_selection(normalized):
+    if not normalized:
         return []
     values = []
     for model_id in normalized:
