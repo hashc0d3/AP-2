@@ -10,7 +10,14 @@ import pytest
 from avito_monitor import config
 from avito_monitor.config import Settings, load_settings
 
-_ENV_KEYS = ("PROXY_STRING", "PROXY_CHANGE_URL", "COOKIES_API_KEY", "WEB_PORT")
+_ENV_KEYS = (
+    "PROXY_STRING",
+    "PROXY_CHANGE_URL",
+    "PROXY_STRING_2",
+    "PROXY_CHANGE_URL_2",
+    "COOKIES_API_KEY",
+    "WEB_PORT",
+)
 
 
 @pytest.fixture
@@ -115,12 +122,20 @@ def test_secrets_come_from_env(config_files) -> None:
     config_files(
         env_text="""
         PROXY_STRING=http://user:pass@1.2.3.4:8000
+        PROXY_STRING_2=http://user:pass@5.6.7.8:9000
+        PROXY_CHANGE_URL_2=https://aproxy.site/?proxy_key=second
         COOKIES_API_KEY=abc123
         """
     )
     settings = load_settings()
     assert settings.proxy_string == "http://user:pass@1.2.3.4:8000"
+    assert settings.proxy_string_2 == "http://user:pass@5.6.7.8:9000"
+    assert settings.proxy_change_url_2 == "https://aproxy.site/?proxy_key=second"
     assert settings.cookies_api_key == "abc123"
+    assert settings.proxy_endpoints() == (
+        ("http://user:pass@1.2.3.4:8000", ""),
+        ("http://user:pass@5.6.7.8:9000", "https://aproxy.site/?proxy_key=second"),
+    )
 
 
 def test_secret_in_toml_is_refused(config_files) -> None:

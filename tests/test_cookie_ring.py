@@ -64,6 +64,19 @@ def test_clients_are_rebuilt_after_ip_change(ring: CookieRing, write_slot) -> No
     assert ring.next()[1] is not before
 
 
+def test_use_current_proxy_rebuilds_on_switch(ring: CookieRing, write_slot) -> None:
+    from avito_monitor.net.proxies import PROXY_POOL
+
+    write_slot(_slot("201"))
+    ring.refresh()
+    before = ring.next()[1]
+    PROXY_POOL.configure((("u:p@mproxy.site:10341", "http://change"),))
+    ring.use_current_proxy()
+    after = ring.next()[1]
+    assert after is not before
+    assert "10341" in str(after.proxies)
+
+
 def test_burned_cookie_leaves_rotation(ring: CookieRing, write_slot, cookies_dir: Path) -> None:
     for cookie_id in ("301", "302"):
         write_slot(_slot(cookie_id))

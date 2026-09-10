@@ -134,6 +134,16 @@ def settings() -> Settings:
     )
 
 
+@pytest.fixture(autouse=True)
+def reset_proxy_pool() -> Iterator[None]:
+    """Тесты не должны видеть прокси, оставшиеся от соседа."""
+    from avito_monitor.net.proxies import PROXY_POOL
+
+    PROXY_POOL.configure(())
+    yield
+    PROXY_POOL.configure(())
+
+
 @pytest.fixture
 def credentials(monkeypatch: pytest.MonkeyPatch) -> tuple[str, str]:
     """Известная пара логин/пароль для проверок входа."""

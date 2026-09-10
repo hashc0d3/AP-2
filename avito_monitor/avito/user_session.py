@@ -225,7 +225,9 @@ def fetch_phone(ad_id: str | int, phone_key: str | None = None) -> dict[str, Any
         logger.info(f"Номер ad={ad_id}: получен напрямую")
         return result
 
-    proxy_string = load_settings().proxy_string
+    from avito_monitor.net.proxies import current_proxy_string
+
+    proxy_string = current_proxy_string(load_settings().proxy_string)
     if proxy_string and result.get("code") in _RETRY_VIA_PROXY_CODES:
         logger.info(f"Номер ad={ad_id}: повтор через прокси")
         result = request_phone(build_user_client(session, proxy_string), ad_id, phone_key=key)

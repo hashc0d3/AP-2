@@ -28,7 +28,8 @@ from avito_monitor.cookies.ring import CookieRing
 from avito_monitor.monitor.pacer import PollPacer, poll_delay
 from avito_monitor.monitor.seen import SeenStore
 from avito_monitor.net import client as net_client
-from avito_monitor.net.proxy import change_ip, ensure_proxy_bypasses_vpn
+from avito_monitor.net.proxy import ensure_proxy_bypasses_vpn
+from avito_monitor.net.proxies import PROXY_POOL
 from avito_monitor.paths import ensure_runtime_dirs
 from avito_monitor.search_session import SESSION
 
@@ -48,21 +49,17 @@ class CycleResult:
     """Avito ограничивал запросы — стоит сбавить темп."""
 
 
-def _rotate_ip(settings: Settings, ring: CookieRing, reason: str) -> None:
-    """Сменить IP сразу, не дожидаясь, пока туннель поднимется."""
-    logger.warning(reason)
-    try:
-        change_ip(settings.proxy_change_url, settings.proxy_string, wait_max=0)
-    except RuntimeError as err:
-        logger.warning(f"Не удалось сменить IP: {err}")
-    ring.reset_clients()
+def _rotate_ip(ring: CookieRing, reason: str) -> None:
+    """Уйти на соседний прокси; на заблокированном сменить IP в фоне."""
+    PROXY_POOL.failover(reason)
+    ring.use_current_proxy()
 
 
 def _recover_empty_pool(settings: Settings, ring: CookieRing, reason: str) -> tuple[dict | None, object]:
     """Нет рабочих cookies — сразу сменить IP и докупить набор."""
     from avito_monitor.cookies import pool
 
-    _rotate_ip(settings, ring, reason)
+    _rotate_ip(ring, reason)
     try:
         pool.replenish_if_empty(settings)
     except Exception as err:
@@ -92,18 +89,24 @@ def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
         try:
             status, payload = net_client.fetch_page(client, url, timeout=settings.request_timeout)
         except RequestException:
-            _rotate_ip(settings, ring, "Прокси сбросил соединение, меняю только IP")
+            _rotate_ip(ring, "Прокси сбросил соединение, переключаюсь")
             client = ring.client_for(slot)
             status, payload = net_client.fetch_page(client, url, timeout=settings.request_timeout)
 
         if status == net_client.RATE_LIMITED:
-            # На 135 циклах повтор сразу после смены IP помог лишь 6 раз из
-            # 32: свежий IP мобильного прокси обычно тоже под лимитом.
-            # Дешевле отдать цикл и зайти новым IP в следующем.
             result.throttled = True
-            result.failed = True
-            _rotate_ip(settings, ring, "429: бан по IP, меняю IP и жду следующий цикл")
-            break
+            _rotate_ip(ring, "429: бан по IP, переключаюсь на соседний прокси")
+            if PROXY_POOL.size < 2:
+                # Один канал: новый IP ещё не готов, повтор в этом цикле почти
+                # не помогает.
+                result.failed = True
+                break
+            client = ring.client_for(slot)
+            status, payload = net_client.fetch_page(client, url, timeout=settings.request_timeout)
+            if status == net_client.RATE_LIMITED:
+                result.failed = True
+                logger.warning("429 и на соседнем прокси — отдаю цикл")
+                break
 
         if status in net_client.COOKIE_BLOCKED:
             result.throttled = True
@@ -123,7 +126,7 @@ def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
 
         if not payload and status == 200:
             result.throttled = True
-            _rotate_ip(settings, ring, "200 без JSON — антибот вместо API, меняю IP")
+            _rotate_ip(ring, "200 без JSON — антибот вместо API, переключаюсь")
             client = ring.client_for(slot)
             status, payload = net_client.fetch_page(client, url, timeout=settings.request_timeout)
 
@@ -241,10 +244,10 @@ def _monitor_search(settings: Settings, ring: CookieRing, seen: SeenStore, gener
             first_run = False
         except Exception as err:
             # Любая неожиданная ошибка не должна останавливать мониторинг:
-            # меняем IP и пробуем следующий цикл.
+            # переключаем прокси и пробуем следующий цикл.
             failed = True
             logger.error(f"Ошибка цикла: {err}")
-            _rotate_ip(runtime, ring, "Восстанавливаюсь после ошибки цикла")
+            _rotate_ip(ring, "Восстанавливаюсь после ошибки цикла")
 
         if failed or throttled:
             pacer.on_throttle()
@@ -278,6 +281,7 @@ def main() -> None:
     migrate_legacy_session()
     warn_about_weak_password()
 
+    PROXY_POOL.configure(settings.proxy_endpoints())
     service.start_background(settings)
     ensure_proxy_bypasses_vpn()
     start_server(settings)

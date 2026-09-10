@@ -21,6 +21,8 @@ from avito_monitor.paths import CONFIG_PATH, ENV_PATH
 _SECRET_ENV_KEYS = {
     "proxy_string": "PROXY_STRING",
     "proxy_change_url": "PROXY_CHANGE_URL",
+    "proxy_string_2": "PROXY_STRING_2",
+    "proxy_change_url_2": "PROXY_CHANGE_URL_2",
     "cookies_api_key": "COOKIES_API_KEY",
 }
 
@@ -42,6 +44,8 @@ class Settings:
     # ── Доступы (только из .env) ────────────────────────────────────────
     proxy_string: str = ""
     proxy_change_url: str = ""
+    proxy_string_2: str = ""
+    proxy_change_url_2: str = ""
     cookies_api_key: str = ""
 
     # ── Что показывать ──────────────────────────────────────────────────
@@ -110,6 +114,17 @@ class Settings:
         # Список моделей приходит и из config.toml, и из интерфейса. Приводим к
         # одному виду здесь, чтобы дальше по коду встречались только известные id.
         object.__setattr__(self, "iphone_models", iphone.normalize_models(self.iphone_models))
+
+    def proxy_endpoints(self) -> tuple[tuple[str, str], ...]:
+        """Пары (строка прокси, ссылка смены IP) для рабочего пула."""
+        pairs: list[tuple[str, str]] = []
+        first = self.proxy_string.strip()
+        if first:
+            pairs.append((first, self.proxy_change_url.strip()))
+        second = self.proxy_string_2.strip()
+        if second:
+            pairs.append((second, self.proxy_change_url_2.strip()))
+        return tuple(pairs)
 
     def for_search(
         self,

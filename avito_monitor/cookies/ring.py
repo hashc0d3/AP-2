@@ -24,6 +24,7 @@ from loguru import logger
 from avito_monitor.config import Settings
 from avito_monitor.cookies import pool
 from avito_monitor.net.client import Session, build_client
+from avito_monitor.net.proxies import current_proxy_string
 
 
 class CookieRing:
@@ -36,7 +37,7 @@ class CookieRing:
     """Максимальный срок жизни соединения на один набор."""
 
     def __init__(self, settings: Settings) -> None:
-        self._proxy = settings.proxy_string
+        self._proxy = current_proxy_string(settings.proxy_string)
         self._clients: dict[str, Session] = {}
         self._created_at: dict[str, float] = {}
         self._slots: dict[str, dict] = {}
@@ -87,9 +88,18 @@ class CookieRing:
             logger.debug(f"Кольцо: клиент id={cookie_id} не закрылся — {err}")
 
     def reset_clients(self) -> None:
-        """Забыть все соединения: после смены IP они больше не работают."""
+        """Забыть все соединения: после смены IP или прокси они мертвы."""
         for cookie_id in list(self._clients):
             self._close(cookie_id)
+
+    def use_current_proxy(self) -> None:
+        """Перейти на рабочий сейчас прокси и сбросить старые соединения."""
+        incoming = current_proxy_string(self._proxy)
+        if incoming == self._proxy:
+            self.reset_clients()
+            return
+        self._proxy = incoming
+        self.reset_clients()
 
     def client_for(self, slot: dict) -> Session:
         """Клиент для набора: существующий или новый."""

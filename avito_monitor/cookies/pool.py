@@ -29,6 +29,7 @@ from loguru import logger
 
 from avito_monitor import spfa
 from avito_monitor.config import Settings
+from avito_monitor.net.proxies import current_proxy_string
 from avito_monitor.paths import (
     COOKIE_LIFECYCLE_LOG,
     COOKIES_DIR,
@@ -202,7 +203,9 @@ def buy_one(settings: Settings, *, pause: bool = True) -> dict:
     :raises spfa.SpfaError: сервис не отдал набор.
     """
     logger.info("Покупаю cookies для пула…")
-    results = spfa.buy_cookies(settings.cookies_api_key, settings.proxy_string)
+    results = spfa.buy_cookies(
+        settings.cookies_api_key, current_proxy_string(settings.proxy_string)
+    )
 
     fingerprint = results.get("fingerprint") or {}
     headers = fingerprint.get("headers") if isinstance(fingerprint, dict) else {}
@@ -271,7 +274,11 @@ def unblock_one(slot: dict, settings: Settings) -> dict | None:
     logger.info(f"Пул: разблокирую id={cookie_id}")
 
     try:
-        results = spfa.unblock_cookies(cookie_id, settings.cookies_api_key, settings.proxy_string)
+        results = spfa.unblock_cookies(
+            cookie_id,
+            settings.cookies_api_key,
+            current_proxy_string(settings.proxy_string),
+        )
     except spfa.SpfaCookieGone as err:
         blocked_for = _elapsed_since(slot.get("blocked_at"))
         slot["status"] = STATUS_DEAD
