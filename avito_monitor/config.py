@@ -52,7 +52,7 @@ class Settings:
 
     # ── Что показывать ──────────────────────────────────────────────────
     ignore_promotion: bool = True
-    private_only: bool = True
+    private_only: bool = False
     seller_skip: tuple[str, ...] = ()
     title_must_contain: tuple[str, ...] = ()
     title_skip: tuple[str, ...] = ()

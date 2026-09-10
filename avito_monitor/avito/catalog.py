@@ -46,10 +46,9 @@ _LOCATION_ID_RE = re.compile(r"(?:^|[?&])locationId=(\d+)")
 # Хеш фильтра в пути категории: apple-ASgBAgIC…
 _FILTER_HASH_RE = re.compile(r"-(ASgB[\w-]+)$")
 _API_PATH_MARKER = "/web/1/js/items"
-# Эти ключи на JSON SERP подмешивают платную выдачу вместо «по дате».
-_DROP_FROM_ITEMS_API = frozenset(
-    {"presentationType", "sort", "p", "page", "context", "verticalCategoryId"}
-)
+# Служебные ключи веб-ссылки, которых в JSON API быть не должно.
+# ``s`` — веб-сортировка; для items API нужна ``sort=date``, как 6 сентября.
+_DROP_FROM_ITEMS_API = frozenset({"p", "page", "context", "verticalCategoryId", "s"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,10 +201,10 @@ _SORT_QUERY_KEYS = frozenset({"s", "sort"})
 
 
 def with_date_sort(url: str) -> str:
-    """Та же ссылка, но сортировка всегда «по дате», свежие сверху.
+    """Веб-ссылка со сортировкой «по дате» (``s=104``).
 
-    Avito кодирует это как ``s=104``. ``s=1`` / ``s=101`` — рекомендательная
-    и платная выдача, ``sort=date`` в JSON API тоже подмешивает VAS.
+    Это для сайта. JSON API собирается отдельно: ``presentationType=serp``
+    и ``sort=date`` — так выдача работала 6 сентября.
     """
     if not (url or "").strip():
         return url
@@ -220,15 +219,12 @@ def with_date_sort(url: str) -> str:
 
 
 def normalize_items_api_url(api_url: str, *, prefer_s: str | None = None) -> str:
-    """Привести адрес JSON API к той же выдаче, что веб-поиск «по дате».
+    """Привести адрес JSON API к выдаче 6 сентября.
 
-    ``presentationType=serp`` и ``sort=date`` подмешивают платные карточки:
-    на сайте при этом обычные объявления, а в JSON — все «Продвинуто».
-    Сортировку всегда ставим ``s=104``, даже если во вставленной ссылке
-    другое значение: иначе в выдачу попадают вчерашние объявления.
-    Без ``owner[]=private`` JSON забивают магазины: ``p=1`` и ``p=2``
-    становятся одной и той же тридцаткой, а свежие частные объявления
-    не попадают в ленту.
+    Рабочий запрос тогда был ``presentationType=serp``, ``sort=date``,
+    ``owner[0]=private``, ``privateOnly=1``. Без ``s=104``: этот код для
+    сайта, а в ``/web/1/js/items`` он отдаёт одну и ту же витрину магазинов.
+    ``prefer_s`` оставлен для совместимости вызовов и не используется.
     """
     split = urlsplit(api_url)
     raw = parse_qsl(split.query, keep_blank_values=True)
@@ -237,14 +233,17 @@ def normalize_items_api_url(api_url: str, *, prefer_s: str | None = None) -> str
         (key, value)
         for key, value in raw
         if key not in _DROP_FROM_ITEMS_API
-        and key != "s"
-        and key not in {"privateOnly", "user"}
+        and key not in {"privateOnly", "user", "presentationType", "sort"}
         and not key.startswith("owner")
     ]
-    query.append(("s", DATE_SORT))  # по дате, свежие сверху
-    query.append(("owner[]", "private"))
-    query.append(("privateOnly", "1"))
-    query.append(("user", "1"))
+    query.extend(
+        (
+            ("owner[0]", "private"),
+            ("privateOnly", "1"),
+            ("presentationType", "serp"),
+            ("sort", "date"),
+        )
+    )
     path = split.path if split.path and _API_PATH_MARKER in split.path else _API_PATH_MARKER
     return urlunsplit(
         (split.scheme or "https", split.netloc or "www.avito.ru", path, urlencode(query), "")
@@ -373,10 +372,10 @@ def build_api_url(region_slug: str, category_id: str, *, query: str = "") -> str
         (
             ("localPriority", "0"),
             ("locationId", location_id),
-            ("owner[]", "private"),
+            ("owner[0]", "private"),
             ("privateOnly", "1"),
-            ("s", "104"),
-            ("user", "1"),
+            ("presentationType", "serp"),
+            ("sort", "date"),
         )
     )
     f_hash = category_filter_hash(category)

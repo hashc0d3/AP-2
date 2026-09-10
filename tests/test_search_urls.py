@@ -80,10 +80,12 @@ def test_all_categories_requires_query() -> None:
 def test_api_url_built_locally(region: str, category: str, expected: list[str]) -> None:
     url = catalog.build_api_url(region, category)
     assert url is not None
-    for fragment in [*expected, "s=104", "privateOnly=1", "owner%5B%5D=private", "user=1"]:
+    for fragment in [*expected, "privateOnly=1", "owner%5B0%5D=private"]:
         assert fragment in url
-    assert "presentationType" not in url
-    assert "sort=date" not in url
+    assert "presentationType=serp" in url
+    assert "sort=date" in url
+    assert "s=104" not in url
+    assert "user=1" not in url
 
 
 def test_api_url_passes_catalog_filter_hash() -> None:
@@ -104,10 +106,12 @@ def test_all_categories_api_url_has_query_and_no_category() -> None:
     assert url is not None
     assert "categoryId=" not in url
     assert "q=iphone" in url
-    assert "s=104" in url
+    assert "sort=date" in url
     assert "privateOnly=1" in url
-    assert "owner%5B%5D=private" in url
-    assert "user=1" in url
+    assert "owner%5B0%5D=private" in url
+    assert "presentationType=serp" in url
+    assert "s=104" not in url
+    assert "user=1" not in url
     assert "locationId=637640" in url
 
 
@@ -125,36 +129,41 @@ def test_with_page_replaces_existing_page() -> None:
     assert catalog.with_page(second, 3).count("p=") == 1
 
 
-def test_normalize_always_forces_date_sort() -> None:
-    """Даже если во вставленной ссылке s=1, запрос идёт «по дате»."""
+def test_normalize_uses_serp_date_sort() -> None:
+    """JSON API — presentationType=serp и sort=date, как 6 сентября."""
     dirty = "https://www.avito.ru/web/1/js/items?locationId=637640&s=1"
     clean = catalog.normalize_items_api_url(dirty, prefer_s="1")
-    assert "s=104" in clean
-    assert "s=1" not in clean.replace("s=104", "")
+    assert "presentationType=serp" in clean
+    assert "sort=date" in clean
+    assert "s=1" not in clean
+    assert "s=104" not in clean
 
 
 def test_normalize_adds_private_filter_when_missing() -> None:
-    """Без owner[] JSON забивают магазины, свежие частные объявления пропадают."""
+    """Частные в запросе — как в рабочем SPFA-адресе 6 сентября."""
     dirty = "https://www.avito.ru/web/1/js/items?locationId=637640&s=104"
     clean = catalog.normalize_items_api_url(dirty)
-    assert "owner%5B%5D=private" in clean
+    assert "owner%5B0%5D=private" in clean
     assert "privateOnly=1" in clean
-    assert "user=1" in clean
-    assert "s=104" in clean
+    assert "presentationType=serp" in clean
+    assert "sort=date" in clean
+    assert "user=1" not in clean
+    assert "s=104" not in clean
 
 
-def test_normalize_drops_serp_mixers() -> None:
+def test_normalize_keeps_serp_date_and_drops_web_sort() -> None:
     dirty = (
         "https://www.avito.ru/web/1/js/items?locationId=637640"
         "&presentationType=serp&sort=date&s=1&owner[]=private"
     )
     clean = catalog.normalize_items_api_url(dirty, prefer_s="104")
-    assert "presentationType" not in clean
-    assert "sort=" not in clean
-    assert "s=104" in clean
+    assert "presentationType=serp" in clean
+    assert "sort=date" in clean
+    assert "s=1" not in clean
+    assert "s=104" not in clean
     assert "privateOnly=1" in clean
-    assert "user=1" in clean
-    assert "owner%5B%5D=private" in clean
+    assert "user=1" not in clean
+    assert "owner%5B0%5D=private" in clean
 
 
 def test_api_url_from_pasted_apple_link() -> None:
@@ -166,10 +175,10 @@ def test_api_url_from_pasted_apple_link() -> None:
     assert url is not None
     assert "locationId=637640" in url
     assert "categoryId=84" in url
-    assert "s=104" in url
     assert "f=ASgBAgICAkS0wA3OqzmwwQ2I_Dc" in url
-    assert "presentationType" not in url
-    assert "sort=date" not in url
+    assert "presentationType=serp" in url
+    assert "sort=date" in url
+    assert "s=104" not in url
 
 
 def test_api_url_from_pasted_link_keeps_query_and_price() -> None:
@@ -213,16 +222,17 @@ def test_with_date_sort_rewrites_any_s() -> None:
     assert "q=iphone" in url
 
 
-def test_resolve_sanitizes_service_url(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_keeps_serp_date_from_service(monkeypatch: pytest.MonkeyPatch) -> None:
     dirty = (
         "https://www.avito.ru/web/1/js/items?locationId=653240"
         "&presentationType=serp&sort=date&s=1"
     )
     monkeypatch.setattr("avito_monitor.spfa.convert_avito_url", lambda _url: dirty)
     url = resolve_api_url("https://www.avito.ru/kazan/telefony?s=104")
-    assert "presentationType" not in url
-    assert "sort=" not in url
-    assert "s=104" in url
+    assert "presentationType=serp" in url
+    assert "sort=date" in url
+    assert "s=104" not in url
+    assert "s=1" not in url
 
 
 # ── Фильтр моделей ─────────────────────────────────────────────────────────

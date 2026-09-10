@@ -7,15 +7,14 @@ Avito не даёт публичного API. Ссылку веб-поиска �
 2. вставленная пользователем ссылка, из которой хватает региона и фильтра;
 3. иначе один раз спрашиваем spfa.pro и кэшируем ответ.
 
-После любого источника адрес чистим: ``presentationType=serp`` и
-``sort=date`` дают платную выдачу, не ту, что на сайте «по дате».
+После любого источника адрес приводим к выдаче 6 сентября:
+``presentationType=serp``, ``sort=date``, частные объявления.
 """
 
 from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from urllib.parse import parse_qsl, urlsplit
 
 from loguru import logger
 
@@ -107,13 +106,6 @@ def plan_from_url(web_url: str) -> SearchPlan:
     )
 
 
-def _s_from_url(url: str) -> str | None:
-    for key, value in parse_qsl(urlsplit(url).query, keep_blank_values=True):
-        if key == "s":
-            return value
-    return None
-
-
 def resolve_api_url(
     web_url: str, *, region_slug: str = "", category_id: str = "", query: str = ""
 ) -> str:
@@ -134,10 +126,9 @@ def resolve_api_url(
 
 
 def _finish_api_url(api_url: str, web_url: str) -> str:
-    """Выкинуть параметры платной SERP и переписать коды моделей."""
-    cleaned = catalog.normalize_items_api_url(
-        api_url, prefer_s=_s_from_url(web_url) or "104"
-    )
+    """Поставить serp/sort=date и переписать коды моделей."""
+    _ = web_url
+    cleaned = catalog.normalize_items_api_url(api_url)
     return iphone_params.retarget_web_model_params(cleaned)
 
 

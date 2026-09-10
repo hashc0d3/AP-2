@@ -71,8 +71,8 @@ def _recover_empty_pool(settings: Settings, ring: CookieRing, reason: str) -> tu
 def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
     """Забрать выдачу Avito одним запросом и разобрать JSON как есть.
 
-    ``p=1`` / ``p=2`` пока не добавляем: парсим то, что Avito вернул
-    на ссылку с сортировкой по дате.
+    Запрос как 6 сентября: ``presentationType=serp`` и ``sort=date``,
+    без ``p=1`` / ``p=2`` и без принудительного ``s=104``.
     """
     result = CycleResult()
     slot, client = ring.next()
@@ -98,7 +98,7 @@ def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
         return True
 
     url = settings.api_url
-    logger.info("Запрашиваю выдачу, сортировка по дате (s=104)")
+    logger.info("Запрашиваю выдачу, presentationType=serp, sort=date")
     status, payload = 0, None
     try:
         status, payload = _fetch_page(client, url, settings.request_timeout)
@@ -221,12 +221,7 @@ def _runtime_settings(settings: Settings, search: dict) -> Settings:
         models = None
     web_url = catalog.with_date_sort(search.get("web_url") or "")
     raw_api = search.get("api_url") or ""
-    api_url = catalog.normalize_items_api_url(raw_api, prefer_s=catalog.DATE_SORT) if raw_api else ""
-    if raw_api and api_url != raw_api and (
-        "presentationType" in raw_api or "sort=date" in raw_api
-    ):
-        logger.info("API URL очищен от платной SERP — иначе вся страница «Продвинуто»")
-        logger.info(f"API URL: {api_url}")
+    api_url = catalog.normalize_items_api_url(raw_api) if raw_api else ""
     return settings.for_search(
         web_url=web_url,
         api_url=api_url,

@@ -336,8 +336,9 @@ def test_search_by_url_builds_local_api(signed_in: requests.Session, base_url: s
     assert response.status_code == 200
     payload = response.json()
     assert payload["running"] is True
-    assert "s=104" in payload["api_url"]
-    assert "presentationType" not in payload["api_url"]
+    assert "presentationType=serp" in payload["api_url"]
+    assert "sort=date" in payload["api_url"]
+    assert "s=104" not in payload["api_url"]
     assert payload["region"]["slug"] == "moskva"
     signed_in.post(f"{base_url}/api/search/stop", timeout=5)
 
