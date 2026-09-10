@@ -78,6 +78,7 @@ class FilterStats:
     iphone_model: int = 0
     too_late: int = 0
     already_seen: int = 0
+    promotion_badge_ignored: bool = False
 
     def summary(self) -> str:
         """Строка для лога: перечислены только сработавшие фильтры."""
@@ -92,6 +93,8 @@ class FilterStats:
             ("уже показывали", self.already_seen),
         )
         parts = [f"{label}: {count}" for label, count in reasons if count]
+        if self.promotion_badge_ignored:
+            parts.append("бейдж «Продвинуто» на всех, не прячу")
         return ", ".join(parts)
 
 
@@ -113,6 +116,9 @@ def select_new_ads(
     """
     stats = FilterStats(total=len(items))
     selected: list[dict] = []
+    hide_promoted = settings.ignore_promotion and not items_mod.all_items_promoted(items)
+    if settings.ignore_promotion and not hide_promoted and items:
+        stats.promotion_badge_ignored = True
 
     for item in items:
         ad_id = items_mod.item_id(item)
@@ -120,7 +126,7 @@ def select_new_ads(
             continue
         already_seen = ad_id in seen
 
-        if settings.ignore_promotion and items_mod.is_promoted(item):
+        if hide_promoted and items_mod.is_promoted(item):
             seen.add(ad_id)
             stats.promoted += 1
             continue

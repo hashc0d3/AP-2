@@ -120,8 +120,9 @@ def test_with_page_replaces_existing_page() -> None:
     url = catalog.build_api_url("all", "apple_phones")
     assert url is not None
     second = catalog.with_page(url, 2)
-    assert "page=2" in second
-    assert catalog.with_page(second, 3).count("page=") == 1
+    assert "p=2" in second
+    assert "page=" not in second
+    assert catalog.with_page(second, 3).count("p=") == 1
 
 
 def test_normalize_drops_serp_mixers() -> None:

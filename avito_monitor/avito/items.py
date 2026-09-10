@@ -148,6 +148,16 @@ def is_promoted(item: dict) -> bool:
     return False
 
 
+def all_items_promoted(items: list[dict]) -> bool:
+    """Бейдж «Продвинуто» стоит на всей странице — это уже не отбор VAS.
+
+    В мобильном JSON Avito иногда помечает так каждую карточку, хотя на
+    сайте те же объявления обычные. Прятать тогда нечего: лента пустеет.
+    """
+    found = [item for item in items if item_id(item) is not None]
+    return bool(found) and all(is_promoted(item) for item in found)
+
+
 # ── Продавец ───────────────────────────────────────────────────────────────
 
 

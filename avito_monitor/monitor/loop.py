@@ -40,16 +40,12 @@ FULL_PAGE_ITEMS = 10
 
 def should_open_next_page(
     *,
-    suitable: list,
     page_items: list,
     page: int,
     max_pages: int,
 ) -> bool:
-    """Листать дальше, только если на этой странице нет ничего для ленты.
-
-    Первую страницу повторно не берём: во втором запросе только ``page=2``.
-    """
-    if suitable or page >= max_pages:
+    """Следующая страница — отдельный запрос ``p=N``, если эта ещё полная."""
+    if page >= max_pages:
         return False
     return len(page_items) >= FULL_PAGE_ITEMS
 
@@ -92,31 +88,11 @@ def _recover_empty_pool(settings: Settings, ring: CookieRing, reason: str) -> tu
     return ring.next()
 
 
-def _preview_suitable(
-    items: list[dict],
-    settings: Settings,
-    seen: set[int] | None,
-    *,
-    first_run: bool,
-) -> list[dict]:
-    """Подходящие на уже скачанных страницах, без записи в память цикла."""
-    if seen is None:
-        return items
-    selected, _ = filters.select_new_ads(items, settings, set(seen), first_run=first_run)
-    return selected
-
-
-def fetch_items(
-    settings: Settings,
-    ring: CookieRing,
-    seen: set[int] | None = None,
-    *,
-    first_run: bool = False,
-) -> CycleResult:
+def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
     """Забрать выдачу Avito, восстанавливаясь после отказов.
 
-    Страницы после первой запрашиваем только если на уже скачанных нет
-    подходящих объявлений — иначе зря бьём Avito повторно.
+    Страницы ``p=1`` и ``p=2`` — отдельные запросы. Дальше не идём, если
+    текущая страница короче полной выдачи.
     """
     result = CycleResult()
     slot, client = ring.next()
@@ -208,16 +184,14 @@ def fetch_items(
             ad_id = items_mod.item_id(item)
             if ad_id is not None:
                 collected.setdefault(ad_id, item)
+        logger.info(f"p={page}: {len(page_items)} объявлений")
         if not should_open_next_page(
-            suitable=_preview_suitable(
-                list(collected.values()), settings, seen, first_run=first_run
-            ),
             page_items=page_items,
             page=page,
             max_pages=settings.pages,
         ):
             break
-        logger.info(f"Страница {page}: подходящих нет, беру следующие без повтора")
+        logger.info(f"Беру p={page + 1} отдельным запросом")
         if settings.pause_between_pages:
             time.sleep(settings.pause_between_pages)
 
@@ -236,7 +210,7 @@ def run_cycle(
 
     Возвращает ``(объявления для ленты, цикл провалился, Avito ограничивает)``.
     """
-    result = fetch_items(settings, ring, seen.ids, first_run=first_run)
+    result = fetch_items(settings, ring)
     if not result.items:
         if result.status:
             logger.error(f"Цикл без объявлений, status={result.status}")
@@ -248,6 +222,8 @@ def run_cycle(
 
     summary = stats.summary()
     logger.info(f"Подходящих: {len(selected)}" + (f" ({summary})" if summary else ""))
+    if stats.promotion_badge_ignored and first_run:
+        logger.info(f"API URL: {settings.api_url}")
 
     if not selected:
         logger.info("Новых объявлений нет")

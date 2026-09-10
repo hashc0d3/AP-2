@@ -355,12 +355,16 @@ def build_api_url(region_slug: str, category_id: str, *, query: str = "") -> str
 
 
 def with_page(api_url: str, page: int) -> str:
-    """Тот же адрес API, но для указанной страницы выдачи."""
+    """Тот же адрес API, но для указанной страницы выдачи.
+
+    Avito в веб-ссылке и в ``/web/1/js/items`` листает параметром ``p``,
+    не ``page``.
+    """
     split = urlsplit(api_url)
     query = [
         (key, value)
         for key, value in parse_qsl(split.query, keep_blank_values=True)
         if key not in {"p", "page"}
     ]
-    query.append(("page", str(page)))
+    query.append(("p", str(page)))
     return urlunsplit((split.scheme, split.netloc, split.path, urlencode(query), split.fragment))

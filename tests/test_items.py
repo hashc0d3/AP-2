@@ -106,6 +106,13 @@ def test_ordinary_ad_is_not_promoted() -> None:
     assert items.is_promoted(_item(iva={"DateInfoStep": [{"payload": {"vas": []}}]})) is False
 
 
+def test_all_items_promoted_needs_every_card() -> None:
+    badge = {"DateInfoStep": [{"payload": {"vas": [{"title": "Продвинуто"}]}}]}
+    assert items.all_items_promoted([_item(id=1, iva=badge), _item(id=2, iva=badge)]) is True
+    assert items.all_items_promoted([_item(id=1, iva=badge), _item(id=2)]) is False
+    assert items.all_items_promoted([]) is False
+
+
 # ── Продавец ───────────────────────────────────────────────────────────────
 
 

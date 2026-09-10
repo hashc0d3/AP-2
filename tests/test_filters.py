@@ -140,11 +140,25 @@ def test_rejected_non_promo_ads_can_surface_later(base_settings: Settings) -> No
 def test_promoted_ads_are_remembered_so_they_dont_resurface(base_settings: Settings) -> None:
     """Иначе продвинутое объявление всплывёт позже как новое."""
     promoted = _ad(9, iva={"DateInfoStep": [{"payload": {"vas": [{"title": "Продвинуто"}]}}]})
+    ordinary = _ad(8)
     seen: set[int] = set()
-    selected, stats = filters.select_new_ads([promoted], base_settings, seen, first_run=True)
-    assert selected == []
+    selected, stats = filters.select_new_ads(
+        [promoted, ordinary], base_settings, seen, first_run=True
+    )
+    assert [ad["id"] for ad in selected] == [8]
     assert stats.promoted == 1
-    assert seen == {9}
+    assert 9 in seen
+
+
+def test_all_promoted_page_is_not_hidden(base_settings: Settings) -> None:
+    """Бейдж на каждой карточке JSON — ложный, на сайте те же объявления обычные."""
+    badge = {"DateInfoStep": [{"payload": {"vas": [{"title": "Продвинуто"}]}}]}
+    selected, stats = filters.select_new_ads(
+        [_ad(1, iva=badge), _ad(2, iva=badge)], base_settings, set(), first_run=True
+    )
+    assert {ad["id"] for ad in selected} == {1, 2}
+    assert stats.promoted == 0
+    assert stats.promotion_badge_ignored is True
 
 
 def test_promoted_can_be_allowed(base_settings: Settings) -> None:
