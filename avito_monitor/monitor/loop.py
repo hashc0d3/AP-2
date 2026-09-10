@@ -3,7 +3,7 @@
 Схема одного цикла:
 
 1. взять следующий набор cookies из кольца;
-2. запросить страницы выдачи;
+2. запросить выдачу одним запросом и разобрать JSON;
 3. при отказе Avito — увести набор на соседний прокси или взять другой набор;
 4. отфильтровать выдачу и отдать новое в веб-ленту;
 5. выдержать паузу, размер которой определяет :mod:`~.pacer`.
@@ -31,26 +31,6 @@ from avito_monitor.net.proxy import ensure_proxy_bypasses_vpn
 from avito_monitor.net.proxies import PROXY_POOL
 from avito_monitor.paths import ensure_runtime_dirs
 from avito_monitor.search_session import SESSION
-
-FULL_PAGE_ITEMS = 10
-"""Ориентир размера страницы в тестах; пустая страница — конец выдачи."""
-
-
-def should_open_next_page(
-    *,
-    page_items: list,
-    page: int,
-    max_pages: int,
-) -> bool:
-    """Следующая страница — отдельный запрос ``p=N``.
-
-    Первая страница часто забита магазинами, частные карточки уезжают на
-    ``p=2``. Пустую страницу не листаем: выдачи больше нет.
-    """
-    if page >= max_pages:
-        return False
-    return bool(page_items)
-
 
 @dataclass(slots=True)
 class CycleResult:
@@ -89,11 +69,10 @@ def _recover_empty_pool(settings: Settings, ring: CookieRing, reason: str) -> tu
 
 
 def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
-    """Забрать выдачу Avito, восстанавливаясь после отказов.
+    """Забрать выдачу Avito одним запросом и разобрать JSON как есть.
 
-    Страницы ``p=1`` и ``p=2`` — два отдельных запроса подряд, не одна
-    ссылка. Сначала первая, потом вторая: иначе частные объявления,
-    вытесненные магазинами с первой страницы, мы не видим.
+    ``p=1`` / ``p=2`` пока не добавляем: парсим то, что Avito вернул
+    на ссылку с сортировкой по дате.
     """
     result = CycleResult()
     slot, client = ring.next()
@@ -105,7 +84,6 @@ def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
 
     proxy = ring.proxy_of(slot).rsplit("@", 1)[-1] or "без прокси"
     logger.info(f"Цикл на cookie id={slot.get('id')} [{ring.position()}] через {proxy}")
-    collected: dict[int, dict] = {}
     rotated = False
 
     def rotate(reason: str) -> bool:
@@ -119,82 +97,62 @@ def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
         client = ring.client_for(slot)
         return True
 
-    for page in range(1, settings.pages + 1):
-        url = catalog.with_page(settings.api_url, page)
-        logger.info(f"Запрашиваю отдельно p={page}, сортировка по дате (s=104)")
-        try:
-            status, payload = _fetch_page(client, url, settings.request_timeout)
-        except RequestException:
-            if not rotate("Прокси сбросил соединение, переключаюсь"):
-                result.failed = True
-                break
+    url = settings.api_url
+    logger.info("Запрашиваю выдачу, сортировка по дате (s=104)")
+    status, payload = 0, None
+    try:
+        status, payload = _fetch_page(client, url, settings.request_timeout)
+    except RequestException:
+        if rotate("Прокси сбросил соединение, переключаюсь"):
             try:
                 status, payload = _fetch_page(client, url, settings.request_timeout)
             except RequestException:
-                result.failed = True
                 logger.warning("Соседний прокси тоже сбросил соединение — отдаю цикл")
-                break
+                return CycleResult(failed=True)
+        else:
+            return CycleResult(failed=True)
 
+    if status == net_client.RATE_LIMITED:
+        result.throttled = True
+        if PROXY_POOL.size < 2:
+            rotate("429: бан по IP, меняю адрес")
+            return CycleResult(status=status, failed=True, throttled=True)
+        if not rotate("429: бан по IP, переключаюсь на соседний прокси"):
+            return CycleResult(status=status, failed=True, throttled=True)
+        status, payload = _fetch_page(client, url, settings.request_timeout)
         if status == net_client.RATE_LIMITED:
-            result.throttled = True
-            if PROXY_POOL.size < 2:
-                rotate("429: бан по IP, меняю адрес")
-                result.failed = True
-                break
-            if not rotate("429: бан по IP, переключаюсь на соседний прокси"):
-                result.failed = True
-                break
-            status, payload = _fetch_page(client, url, settings.request_timeout)
-            if status == net_client.RATE_LIMITED:
-                result.failed = True
-                logger.warning("429 и на соседнем прокси — меняю его IP и отдаю цикл")
-                PROXY_POOL.ban(ring.proxy_of(slot), "429 на соседнем канале", wait=False)
-                break
+            logger.warning("429 и на соседнем прокси — меняю его IP и отдаю цикл")
+            PROXY_POOL.ban(ring.proxy_of(slot), "429 на соседнем канале", wait=False)
+            return CycleResult(status=status, failed=True, throttled=True)
 
-        if status in net_client.COOKIE_BLOCKED:
-            result.throttled = True
-            burned = slot.get("id")
-            ring.burn(burned)
-            logger.warning(f"{status}: cookie id={burned} сгорел, IP не меняю, беру другой набор")
-            slot, client = ring.next()
-            if slot is None or client is None:
-                slot, client = _recover_empty_pool(settings, ring, "Все cookies сгорели — докупаю")
-            if slot is None or client is None:
-                logger.error("Пул не дал готовый набор после блокировки")
-                return CycleResult(status=status, failed=True, throttled=True)
-            logger.info(f"Продолжаю на cookie id={slot.get('id')}")
-            status, payload = _fetch_page(client, url, settings.request_timeout)
+    if status in net_client.COOKIE_BLOCKED:
+        result.throttled = True
+        burned = slot.get("id")
+        ring.burn(burned)
+        logger.warning(f"{status}: cookie id={burned} сгорел, IP не меняю, беру другой набор")
+        slot, client = ring.next()
+        if slot is None or client is None:
+            slot, client = _recover_empty_pool(settings, ring, "Все cookies сгорели — докупаю")
+        if slot is None or client is None:
+            logger.error("Пул не дал готовый набор после блокировки")
+            return CycleResult(status=status, failed=True, throttled=True)
+        logger.info(f"Продолжаю на cookie id={slot.get('id')}")
+        status, payload = _fetch_page(client, url, settings.request_timeout)
 
-        if not payload and status == 200:
-            result.throttled = True
-            if not rotate("200 без JSON — антибот вместо API, переключаюсь"):
-                result.failed = True
-                break
-            status, payload = _fetch_page(client, url, settings.request_timeout)
+    if not payload and status == 200:
+        result.throttled = True
+        if not rotate("200 без JSON — антибот вместо API, переключаюсь"):
+            return CycleResult(status=status, failed=True, throttled=True)
+        status, payload = _fetch_page(client, url, settings.request_timeout)
 
-        result.status = status
-        if not payload:
-            logger.error(f"Не удалось получить JSON, status={status}, page={page}")
-            result.failed = True
-            break
+    result.status = status
+    if not payload:
+        logger.error(f"Не удалось получить JSON, status={status}")
+        return CycleResult(status=status, failed=True, throttled=result.throttled)
 
-        page_items = items_mod.extract_items(payload)
-        for item in page_items:
-            ad_id = items_mod.item_id(item)
-            if ad_id is not None:
-                collected.setdefault(ad_id, item)
-        logger.info(f"p={page}: {len(page_items)} объявлений, всего {len(collected)}")
-        if not should_open_next_page(
-            page_items=page_items,
-            page=page,
-            max_pages=settings.pages,
-        ):
-            break
-        logger.info(f"Следующий запрос отдельно: p={page + 1}")
-        if settings.pause_between_pages:
-            time.sleep(settings.pause_between_pages)
-
-    result.items = list(collected.values())
+    items = items_mod.extract_items(payload)
+    logger.info(f"Получено из JSON: {len(items)} объявлений")
+    result.items = items
     return result
 
 
