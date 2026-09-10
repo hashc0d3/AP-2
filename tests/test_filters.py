@@ -205,8 +205,8 @@ def test_results_are_sorted_newest_first(base_settings: Settings) -> None:
     assert [ad["id"] for ad in selected] == [2, 3, 1]
 
 
-def test_ads_published_before_start_are_dropped(base_settings: Settings) -> None:
-    """Вчерашнее объявление не должно всплыть, даже если его не было в первом цикле."""
+def test_unseen_ads_pass_even_if_older_than_start(base_settings: Settings) -> None:
+    """Иначе лента замирает: свежая карточка с чуть старой меткой Avito не всплывает."""
     started = time.time() - 60
     selected, stats = filters.select_new_ads(
         [_ad(1, age=10), _ad(2, age=9000)],
@@ -215,8 +215,8 @@ def test_ads_published_before_start_are_dropped(base_settings: Settings) -> None
         first_run=False,
         started_at=started,
     )
-    assert [ad["id"] for ad in selected] == [1]
-    assert stats.before_start == 1
+    assert [ad["id"] for ad in selected] == [1, 2]
+    assert stats.before_start == 0
 
 
 def test_ads_posted_just_before_start_still_pass(base_settings: Settings) -> None:
@@ -233,7 +233,7 @@ def test_ads_posted_just_before_start_still_pass(base_settings: Settings) -> Non
     assert stats.before_start == 0
 
 
-def test_ads_without_timestamp_are_not_new(base_settings: Settings) -> None:
+def test_ads_without_timestamp_still_pass(base_settings: Settings) -> None:
     selected, stats = filters.select_new_ads(
         [{"id": 1, "title": "без даты"}],
         base_settings,
@@ -241,8 +241,8 @@ def test_ads_without_timestamp_are_not_new(base_settings: Settings) -> None:
         first_run=False,
         started_at=time.time(),
     )
-    assert selected == []
-    assert stats.before_start == 1
+    assert [ad["id"] for ad in selected] == [1]
+    assert stats.before_start == 0
 
 
 def test_iphone_model_filter_is_off_with_listing_pass_through(base_settings: Settings) -> None:

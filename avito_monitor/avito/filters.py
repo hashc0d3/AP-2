@@ -102,16 +102,15 @@ def select_new_ads(
 ) -> tuple[list[dict], FilterStats]:
     """Выбрать объявления для ленты.
 
-    Первый цикл кладёт в ленту всю текущую выдачу — иначе после «Начать
-    поиск» экран пустой, пока не появится свежая карточка. Дальше только
-    то, чего ещё не показывали. Старые объявления, которые Avito подмешал
-    позже, отсекаются по дате публикации.
+    Первый цикл кладёт в ленту всю текущую выдачу. Дальше — любой ID,
+    которого ещё не было: иначе свежие карточки с чуть старой меткой
+    Avito отсекались как «раньше старта», и лента замирала.
 
     Возвращает объявления от свежих к старым и статистику отбора.
     """
     stats = FilterStats(total=len(items))
     selected: list[dict] = []
-    _ = settings
+    _ = (settings, started_at)
     # hide_promoted = settings.ignore_promotion and not items_mod.all_items_promoted(items)
     # if settings.ignore_promotion and not hide_promoted and items:
     #     stats.promotion_badge_ignored = True
@@ -152,9 +151,9 @@ def select_new_ads(
         if already_seen:
             stats.already_seen += 1
             continue
-        if not first_run and started_at and not _published_after(item, started_at):
-            stats.before_start += 1
-            continue
+        # if not first_run and started_at and not _published_after(item, started_at):
+        #     stats.before_start += 1
+        #     continue
         seen.add(ad_id)
         selected.append(item)
         if first_run:

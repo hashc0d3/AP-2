@@ -217,6 +217,9 @@ def run_cycle(
         return [], True, result.throttled
 
     logger.info(f"Получено объявлений: {len(result.items)}")
+    json_ages = [age for age in (items_mod.age_seconds(item) for item in result.items) if age is not None]
+    if json_ages:
+        logger.info(f"В JSON свежее {min(json_ages)} сек, старше {max(json_ages)} сек")
     selected, stats = filters.select_new_ads(
         result.items, settings, seen.ids, first_run=first_run, started_at=started_at
     )

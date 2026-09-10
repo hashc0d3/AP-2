@@ -261,7 +261,7 @@ def test_start_search_all_categories_builds_links(
     path = web_url.split("?", 1)[0]
     assert "q=iphone" in web_url
     assert "s=104" in web_url
-    assert "owner" not in web_url
+    assert "owner" in web_url
     assert "/telefony" not in path
     signed_in.post(f"{base_url}/api/search/stop", timeout=5)
 

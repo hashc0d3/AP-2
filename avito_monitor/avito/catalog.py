@@ -50,8 +50,6 @@ _API_PATH_MARKER = "/web/1/js/items"
 _DROP_FROM_ITEMS_API = frozenset(
     {"presentationType", "sort", "p", "page", "context", "verticalCategoryId"}
 )
-# Временно не просим Avito «только частные»: отдаём всю выдачу по дате.
-_DROP_PRIVATE_LISTING = frozenset({"privateOnly", "user"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,8 +206,9 @@ def normalize_items_api_url(api_url: str, *, prefer_s: str | None = None) -> str
     на сайте при этом обычные объявления, а в JSON — все «Продвинуто».
     Сортировку всегда ставим ``s=104``, даже если во вставленной ссылке
     другое значение: иначе в выдачу попадают вчерашние объявления.
-    Фильтры ``owner[]=private`` / ``privateOnly`` временно снимаем: в ленту
-    идёт вся дата-выдача, и магазины, и частники.
+    Без ``owner[]=private`` JSON забивают магазины: ``p=1`` и ``p=2``
+    становятся одной и той же тридцаткой, а свежие частные объявления
+    не попадают в ленту.
     """
     split = urlsplit(api_url)
     raw = parse_qsl(split.query, keep_blank_values=True)
@@ -218,17 +217,14 @@ def normalize_items_api_url(api_url: str, *, prefer_s: str | None = None) -> str
         (key, value)
         for key, value in raw
         if key not in _DROP_FROM_ITEMS_API
-        and key not in _DROP_PRIVATE_LISTING
         and key != "s"
-        and not (key.startswith("owner") and value == "private")
+        and key not in {"privateOnly", "user"}
+        and not key.startswith("owner")
     ]
     query.append(("s", DATE_SORT))
-    # if not any(key.startswith("owner") and value == "private" for key, value in query):
-    #     query.append(("owner[]", "private"))
-    # if "privateOnly" not in {key for key, _ in query}:
-    #     query.append(("privateOnly", "1"))
-    # if "user" not in {key for key, _ in query}:
-    #     query.append(("user", "1"))
+    query.append(("owner[]", "private"))
+    query.append(("privateOnly", "1"))
+    query.append(("user", "1"))
     path = split.path if split.path and _API_PATH_MARKER in split.path else _API_PATH_MARKER
     return urlunsplit(
         (split.scheme or "https", split.netloc or "www.avito.ru", path, urlencode(query), "")
@@ -309,11 +305,10 @@ def remember_location_id(web_url: str, api_url: str) -> None:
 
 
 def build_web_url(query: str, region_slug: str, category_id: str = "") -> str:
-    """Ссылка обычного веб-поиска Avito: свежие объявления по дате."""
+    """Ссылка обычного веб-поиска Avito: свежие частные объявления по дате."""
     category = find_category(category_id)
     path = "/".join(part for part in (regions.web_slug(region_slug), category.path) if part)
-    params = [*category.extra, "localPriority=0", "s=104"]
-    # params = [*category.extra, "localPriority=0", "s=104", "owner[]=private"]
+    params = [*category.extra, "localPriority=0", "s=104", "owner[]=private"]
     text = (query or "").strip()
     if text:
         params.insert(0, f"q={quote(text)}")
@@ -358,10 +353,10 @@ def build_api_url(region_slug: str, category_id: str, *, query: str = "") -> str
         (
             ("localPriority", "0"),
             ("locationId", location_id),
-            # ("owner[]", "private"),
-            # ("privateOnly", "1"),
+            ("owner[]", "private"),
+            ("privateOnly", "1"),
             ("s", "104"),
-            # ("user", "1"),
+            ("user", "1"),
         )
     )
     f_hash = category_filter_hash(category)
