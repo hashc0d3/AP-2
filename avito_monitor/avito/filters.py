@@ -65,7 +65,7 @@ class FilterStats:
     iphone_model: int = 0
     already_seen: int = 0
     baseline: int = 0
-    """Сколько объявлений запомнили на старте, не кладя в ленту."""
+    """Сколько объявлений положили в ленту на первом цикле."""
     before_start: int = 0
     """Опубликованы до нажатия «Начать поиск»."""
     promotion_badge_ignored: bool = False
@@ -81,7 +81,7 @@ class FilterStats:
             ("не подходит название", self.title),
             ("не та модель iPhone", self.iphone_model),
             ("уже показывали", self.already_seen),
-            ("на старте запомнил", self.baseline),
+            ("на старте в ленту", self.baseline),
             ("раньше старта", self.before_start),
         )
         parts = [f"{label}: {count}" for label, count in reasons if count]
@@ -102,10 +102,10 @@ def select_new_ads(
 ) -> tuple[list[dict], FilterStats]:
     """Выбрать объявления для ленты.
 
-    Первый цикл только запоминает текущую выдачу: в ленту ничего не кладём.
-    Дальше показываем всё, что пришло в JSON после «Начать поиск» и чего
-    не было на старте. Фильтры компаний, частных, промо, названия и модели
-    временно выключены — иначе ложный отсев прятал живые карточки.
+    Первый цикл кладёт в ленту всю текущую выдачу — иначе после «Начать
+    поиск» экран пустой, пока не появится свежая карточка. Дальше только
+    то, чего ещё не показывали. Старые объявления, которые Avito подмешал
+    позже, отсекаются по дате публикации.
 
     Возвращает объявления от свежих к старым и статистику отбора.
     """
@@ -149,18 +149,16 @@ def select_new_ads(
         # ):
         #     stats.iphone_model += 1
         #     continue
-        if first_run:
-            seen.add(ad_id)
-            stats.baseline += 1
-            continue
         if already_seen:
             stats.already_seen += 1
             continue
-        if started_at and not _published_after(item, started_at):
+        if not first_run and started_at and not _published_after(item, started_at):
             stats.before_start += 1
             continue
         seen.add(ad_id)
         selected.append(item)
+        if first_run:
+            stats.baseline += 1
 
     selected.sort(key=lambda item: item.get("sortTimeStamp") or 0, reverse=True)
     return selected, stats

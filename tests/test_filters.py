@@ -125,13 +125,27 @@ def base_settings() -> Settings:
     return Settings(private_only=False, ignore_promotion=True)
 
 
-def test_first_run_remembers_without_showing(base_settings: Settings) -> None:
-    ads = [_ad(1), _ad(2), _ad(3)]
+def test_first_run_puts_current_listing_in_feed(base_settings: Settings) -> None:
+    ads = [_ad(1, age=10), _ad(2, age=40), _ad(3, age=20)]
     seen: set[int] = set()
     selected, stats = filters.select_new_ads(ads, base_settings, seen, first_run=True)
-    assert selected == []
+    assert [ad["id"] for ad in selected] == [1, 3, 2]
     assert stats.baseline == 3
     assert seen == {1, 2, 3}
+
+
+def test_first_run_shows_ads_even_if_older_than_start(base_settings: Settings) -> None:
+    """Иначе лента пустая: вся первая страница опубликована до клика."""
+    started = time.time()
+    selected, stats = filters.select_new_ads(
+        [_ad(1, age=9000)],
+        base_settings,
+        set(),
+        first_run=True,
+        started_at=started,
+    )
+    assert [ad["id"] for ad in selected] == [1]
+    assert stats.before_start == 0
 
 
 def test_later_runs_show_only_unseen(base_settings: Settings) -> None:
@@ -154,14 +168,14 @@ def test_company_ads_pass_while_listing_filters_are_off(base_settings: Settings)
 
 
 def test_promoted_ads_are_remembered_so_they_dont_resurface(base_settings: Settings) -> None:
-    """На старте запоминаем всю выдачу, в том числе с бейджем «Продвинуто»."""
-    promoted = _ad(9, iva={"DateInfoStep": [{"payload": {"vas": [{"title": "Продвинуто"}]}}]})
-    ordinary = _ad(8)
+    """На старте показываем выдачу, в том числе с бейджем «Продвинуто»."""
+    promoted = _ad(9, age=20, iva={"DateInfoStep": [{"payload": {"vas": [{"title": "Продвинуто"}]}}]})
+    ordinary = _ad(8, age=10)
     seen: set[int] = set()
     selected, stats = filters.select_new_ads(
         [promoted, ordinary], base_settings, seen, first_run=True
     )
-    assert selected == []
+    assert [ad["id"] for ad in selected] == [8, 9]
     assert stats.promoted == 0
     assert stats.baseline == 2
     assert seen == {8, 9}

@@ -225,12 +225,11 @@ def run_cycle(
     summary = stats.summary()
     if first_run:
         extra = f" ({summary})" if summary else ""
-        logger.info(f"Старт: запомнил выдачу{extra}, в ленту не кладу — дальше только новые")
+        logger.info(f"Старт: кладу в ленту {len(selected)} объявлений{extra}")
         if stats.promotion_badge_ignored:
             logger.info(f"API URL: {settings.api_url}")
-        return [], result.failed, result.throttled
-
-    logger.info(f"Подходящих: {len(selected)}" + (f" ({summary})" if summary else ""))
+    else:
+        logger.info(f"Подходящих: {len(selected)}" + (f" ({summary})" if summary else ""))
     if stats.company_hints:
         logger.info("Пример «компания»: " + "; ".join(stats.company_hints))
     if not selected:
