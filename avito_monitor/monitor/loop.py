@@ -121,7 +121,7 @@ def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
 
     for page in range(1, settings.pages + 1):
         url = catalog.with_page(settings.api_url, page)
-        logger.info(f"Запрашиваю отдельно p={page}")
+        logger.info(f"Запрашиваю отдельно p={page}, сортировка по дате (s=104)")
         try:
             status, payload = _fetch_page(client, url, settings.request_timeout)
         except RequestException:
@@ -261,7 +261,7 @@ def _runtime_settings(settings: Settings, search: dict) -> Settings:
     category_id = str((search.get("category") or {}).get("id") or "")
     if category_id != catalog.IPHONE_CATEGORY_ID:
         models = None
-    web_url = search.get("web_url") or ""
+    web_url = catalog.with_date_sort(search.get("web_url") or "")
     raw_api = search.get("api_url") or ""
     api_url = catalog.normalize_items_api_url(raw_api, prefer_s=catalog.DATE_SORT) if raw_api else ""
     if raw_api and api_url != raw_api and (

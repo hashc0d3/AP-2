@@ -195,6 +195,22 @@ def test_plan_from_url_reads_region() -> None:
     assert plan.region.slug == "sankt-peterburg"
     assert plan.category is not None
     assert plan.category.id == catalog.IPHONE_CATEGORY_ID
+    assert "s=104" in plan.web_url
+
+
+def test_plan_from_url_forces_date_sort() -> None:
+    """Вставленная ссылка с рекомендательной выдачей всё равно идёт по дате."""
+    plan = plan_from_url("https://www.avito.ru/moskva/telefony?s=1&sort=date")
+    assert "s=104" in plan.web_url
+    assert "s=1" not in plan.web_url.replace("s=104", "")
+    assert "sort=" not in plan.web_url
+
+
+def test_with_date_sort_rewrites_any_s() -> None:
+    url = catalog.with_date_sort("https://www.avito.ru/moskva/telefony?s=101&q=iphone")
+    assert "s=104" in url
+    assert "s=101" not in url
+    assert "q=iphone" in url
 
 
 def test_resolve_sanitizes_service_url(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -198,6 +198,26 @@ def _rebuild_items_url(query: list[tuple[str, str]]) -> str:
 DATE_SORT = "104"
 """Код сортировки Avito «по дате»: свежие сверху, без платной выдачи."""
 
+_SORT_QUERY_KEYS = frozenset({"s", "sort"})
+
+
+def with_date_sort(url: str) -> str:
+    """Та же ссылка, но сортировка всегда «по дате», свежие сверху.
+
+    Avito кодирует это как ``s=104``. ``s=1`` / ``s=101`` — рекомендательная
+    и платная выдача, ``sort=date`` в JSON API тоже подмешивает VAS.
+    """
+    if not (url or "").strip():
+        return url
+    split = urlsplit(url)
+    query = [
+        (key, value)
+        for key, value in parse_qsl(split.query, keep_blank_values=True)
+        if key not in _SORT_QUERY_KEYS
+    ]
+    query.append(("s", DATE_SORT))
+    return urlunsplit((split.scheme, split.netloc, split.path, urlencode(query), split.fragment))
+
 
 def normalize_items_api_url(api_url: str, *, prefer_s: str | None = None) -> str:
     """Привести адрес JSON API к той же выдаче, что веб-поиск «по дате».
@@ -221,7 +241,7 @@ def normalize_items_api_url(api_url: str, *, prefer_s: str | None = None) -> str
         and key not in {"privateOnly", "user"}
         and not key.startswith("owner")
     ]
-    query.append(("s", DATE_SORT))
+    query.append(("s", DATE_SORT))  # по дате, свежие сверху
     query.append(("owner[]", "private"))
     query.append(("privateOnly", "1"))
     query.append(("user", "1"))

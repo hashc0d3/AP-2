@@ -103,7 +103,7 @@ def plan_from_url(web_url: str) -> SearchPlan:
         query=link,
         region=region,
         category=catalog.category_from_web_url(link),
-        web_url=link,
+        web_url=catalog.with_date_sort(link),
     )
 
 
