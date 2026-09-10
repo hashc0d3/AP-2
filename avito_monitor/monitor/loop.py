@@ -128,7 +128,9 @@ def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
             status, payload = _fetch_page(client, url, settings.request_timeout)
             if status == net_client.RATE_LIMITED:
                 result.failed = True
-                logger.warning("429 и на соседнем прокси — отдаю цикл")
+                logger.warning("429 и на соседнем прокси — меняю его IP и отдаю цикл")
+                PROXY_POOL.failover("429 на запасном канале", wait=False)
+                ring.use_current_proxy()
                 break
 
         if status in net_client.COOKIE_BLOCKED:

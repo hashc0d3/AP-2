@@ -1,9 +1,8 @@
 """Набор мобильных прокси: рабочий сейчас и соседний на подхвате.
 
-При бане IP не ждём смену адреса на том же канале: сразу переключаемся
-на готовый соседний, а на заблокированном меняем IP в фоне и не возвращаемся,
-пока туннель не поднимется. Когда прокси один — поведение прежнее: только
-смена IP.
+При бане IP уходим на соседний канал, только если он уже остыл. Иначе
+ждём новый адрес на текущем: прыжок на только что использованный IP
+сразу даёт второй 429 и пустой цикл. Когда прокси один — только смена IP.
 """
 
 from __future__ import annotations
@@ -22,13 +21,14 @@ def _label(proxy_string: str) -> str:
 
 
 class ProxySlot:
-    __slots__ = ("proxy_string", "change_url", "changing", "cooling_until", "ready")
+    __slots__ = ("proxy_string", "change_url", "changing", "cooling_until", "last_used", "ready")
 
     def __init__(self, proxy_string: str, change_url: str) -> None:
         self.proxy_string = proxy_string
         self.change_url = change_url
         self.changing = False
         self.cooling_until = 0.0
+        self.last_used = 0.0
         self.ready = threading.Event()
         self.ready.set()
 
@@ -47,7 +47,7 @@ class ProxyPool:
         self.change_wait = 12.0
         """Сколько ждать подъёма туннеля после смены IP."""
         self.cooldown = 5.0
-        """Пауза после нового IP, чтобы не прыгать обратно на ещё горячий канал."""
+        """Не возвращаться на канал раньше чем через столько секунд после использования."""
 
     def configure(self, endpoints: tuple[tuple[str, str], ...]) -> None:
         slots = [
@@ -79,8 +79,8 @@ class ProxyPool:
         slot = self.current()
         return slot.proxy_string if slot else ""
 
-    def failover(self, reason: str) -> None:
-        """Уйти с текущего прокси на готовый соседний; на старом сменить IP."""
+    def failover(self, reason: str, *, wait: bool = True) -> None:
+        """Уйти на остывший соседний прокси или ждать новый IP на текущем."""
         wait_for: ProxySlot | None = None
         banned: ProxySlot | None = None
         with self._lock:
@@ -88,15 +88,23 @@ class ProxyPool:
                 logger.warning(f"{reason}: прокси не настроены")
                 return
             leaving = self._slots[self._index]
+            leaving.last_used = time.time()
             incoming = leaving
             if len(self._slots) > 1:
                 incoming = self._pick_incoming(leaving)
-                self._index = self._slots.index(incoming)
-                logger.warning(
-                    f"{reason}: {leaving.label} откладываю, работаю через {incoming.label}"
-                )
-                if incoming is not leaving and not incoming.ready.is_set():
-                    wait_for = incoming
+                if incoming is not leaving:
+                    self._index = self._slots.index(incoming)
+                    logger.warning(
+                        f"{reason}: {leaving.label} откладываю, работаю через {incoming.label}"
+                    )
+                    if not incoming.ready.is_set():
+                        wait_for = incoming
+                else:
+                    logger.warning(
+                        f"{reason}: соседний прокси ещё горячий, "
+                        f"жду новый IP на {leaving.label}"
+                    )
+                    wait_for = leaving
             else:
                 logger.warning(f"{reason}: один прокси ({leaving.label}), меняю IP")
             start_change = not leaving.changing
@@ -110,23 +118,28 @@ class ProxyPool:
         elif leaving.change_url:
             logger.info(f"{leaving.label}: смена IP уже идёт")
 
-        if wait_for is not None:
+        if wait and wait_for is not None:
             logger.info(f"Жду, пока {wait_for.label} поднимет новый IP")
             if not wait_for.ready.wait(timeout=self.change_wait + 1.0):
                 logger.warning(f"{wait_for.label} так и не готов, пробую как есть")
 
     def _pick_incoming(self, leaving: ProxySlot) -> ProxySlot:
-        """Готовый сосед; остывающий берём, только если живого нет."""
+        """Сосед, только если он живой и уже остыл.
+
+        Иначе остаёмся на текущем канале и ждём его новый IP: прыжок на
+        только что использованный прокси почти сразу даёт второй 429.
+        """
         others = [slot for slot in self._slots if slot is not leaving]
-        live = [slot for slot in others if slot.ready.is_set() and not slot.changing]
         now = time.time()
-        rested = [slot for slot in live if now >= slot.cooling_until]
-        if rested:
-            return rested[0]
-        if live:
-            return live[0]
-        idx = self._slots.index(leaving)
-        return self._slots[(idx + 1) % len(self._slots)]
+        rested = [
+            slot
+            for slot in others
+            if slot.ready.is_set()
+            and not slot.changing
+            and now >= slot.cooling_until
+            and now >= slot.last_used + self.cooldown
+        ]
+        return rested[0] if rested else leaving
 
     def _change_async(self, slot: ProxySlot) -> None:
         if not slot.change_url:

@@ -80,9 +80,10 @@ def test_all_categories_requires_query() -> None:
 def test_api_url_built_locally(region: str, category: str, expected: list[str]) -> None:
     url = catalog.build_api_url(region, category)
     assert url is not None
-    for fragment in [*expected, "s=104", "sort=date", "privateOnly=1", "owner%5B%5D=private", "user=1"]:
+    for fragment in [*expected, "s=104", "privateOnly=1", "owner%5B%5D=private", "user=1"]:
         assert fragment in url
     assert "presentationType" not in url
+    assert "sort=date" not in url
 
 
 def test_api_url_passes_catalog_filter_hash() -> None:
@@ -104,7 +105,6 @@ def test_all_categories_api_url_has_query_and_no_category() -> None:
     assert "categoryId=" not in url
     assert "q=iphone" in url
     assert "s=104" in url
-    assert "sort=date" in url
     assert "privateOnly=1" in url
     assert "owner%5B%5D=private" in url
     assert "user=1" in url

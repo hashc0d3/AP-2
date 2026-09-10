@@ -224,7 +224,6 @@ def build_api_url(region_slug: str, category_id: str, *, query: str = "") -> str
             ("owner[]", "private"),
             ("privateOnly", "1"),
             ("s", "104"),
-            ("sort", "date"),
             ("user", "1"),
         )
     )

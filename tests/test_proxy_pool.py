@@ -79,8 +79,8 @@ def test_current_proxy_string_falls_back() -> None:
     assert current_proxy_string("fallback") == "u:p@host:1"
 
 
-def test_failover_waits_for_neighbor_still_changing_ip(monkeypatch) -> None:
-    """Не бьём туннель, пока на нём ещё крутится смена IP."""
+def test_failover_waits_for_own_ip_when_neighbor_still_changing(monkeypatch) -> None:
+    """Сосед ещё меняет IP — не прыгаем на него, меняем свой."""
     first_started = threading.Event()
     release_first = threading.Event()
     calls = []
@@ -99,11 +99,27 @@ def test_failover_waits_for_neighbor_still_changing_ip(monkeypatch) -> None:
     assert first_started.wait(timeout=1.0)
     assert pool.current_string() == B[0]
 
-    threading.Timer(0.2, release_first.set).start()
-    started = time.monotonic()
     pool.failover("429")
-    assert time.monotonic() - started >= 0.15
-    assert pool.current_string() == A[0]
+    assert pool.current_string() == B[0]
+    assert "http://change-b" in calls
+    release_first.set()
+
+
+def test_failover_does_not_jump_to_cooling_neighbor(monkeypatch) -> None:
+    """Сосед только что получил новый IP — второй 429 будет сразу."""
+    pool, changed, done = _pool(monkeypatch)
+    pool.cooldown = 30.0
+    pool.configure((A, B))
+    pool.failover("429")
+    assert done.wait(timeout=1.0)
+    assert pool._slots[0].ready.wait(timeout=1.0)
+    assert pool.current_string() == B[0]
+
+    done.clear()
+    pool.failover("ещё 429")
+    assert pool.current_string() == B[0]
+    assert done.wait(timeout=1.0)
+    assert changed[-1] == ("http://change-b", B[0], 12.0)
 
 
 def test_does_not_start_second_ip_change_while_first_runs(monkeypatch) -> None:
