@@ -134,6 +134,14 @@ def test_shop_id_does_not_override_private_profile() -> None:
     assert items.is_private_seller(_with_profile("/user/abc/profile", shopId=99)) is True
 
 
+def test_delivery_shop_block_does_not_override_private_profile() -> None:
+    """IVA ShopInfoStep даёт /shop/, но продавец на карточке — частное лицо."""
+    item = _with_profile("/user/abc/profile", shopId=99)
+    item["iva"]["ShopInfoStep"] = [{"payload": {"link": "/shop/apple-delivery"}}]
+    assert items.is_company_seller(item) is False
+    assert items.is_private_seller(item) is True
+
+
 def test_seller_name_prefers_readable_text() -> None:
     assert items.seller_name(_with_profile("/user/abc/profile")) == "Иван"
 

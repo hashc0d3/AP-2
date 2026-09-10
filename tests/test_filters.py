@@ -90,6 +90,13 @@ def test_unknown_seller_is_allowed() -> None:
     assert filters.seller_is_allowed(_ad(), private_only=True) is True
 
 
+def test_private_seller_with_delivery_shop_is_allowed() -> None:
+    """Корзина даёт /shop/, но продавец — частное лицо."""
+    item = _with_seller(PRIVATE, shopId=99)
+    item["iva"]["ShopInfoStep"] = [{"payload": {"link": "/shop/delivery"}}]
+    assert filters.seller_is_allowed(item, private_only=True) is True
+
+
 # ── Пайплайн отбора ────────────────────────────────────────────────────────
 
 

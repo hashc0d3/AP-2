@@ -43,6 +43,8 @@ _KNOWN_LOCATION_IDS = {
 }
 
 _LOCATION_ID_RE = re.compile(r"(?:^|[?&])locationId=(\d+)")
+# Хеш фильтра в пути категории: apple-ASgBAgIC…
+_FILTER_HASH_RE = re.compile(r"-(ASgB[\w-]+)$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,6 +182,19 @@ def build_web_url(query: str, region_slug: str, category_id: str = "") -> str:
     return f"{WEB_BASE_URL}/{path}?{'&'.join(params)}"
 
 
+def category_filter_hash(category: Category) -> str:
+    """Хеш ``f`` из пути категории или extra веб-ссылки.
+
+    Без него JSON API игнорирует ``owner[]=private`` и отдаёт смешанную SERP
+    с магазинами.
+    """
+    for extra in category.extra:
+        if extra.startswith("f="):
+            return extra[2:]
+    match = _FILTER_HASH_RE.search(category.path)
+    return match.group(1) if match else ""
+
+
 def build_api_url(region_slug: str, category_id: str, *, query: str = "") -> str | None:
     """Адрес JSON API, собранный локально.
 
@@ -207,11 +222,15 @@ def build_api_url(region_slug: str, category_id: str, *, query: str = "") -> str
             ("localPriority", "0"),
             ("locationId", location_id),
             ("owner[]", "private"),
-            ("presentationType", "serp"),
             ("privateOnly", "1"),
+            ("s", "104"),
             ("sort", "date"),
+            ("user", "1"),
         )
     )
+    f_hash = category_filter_hash(category)
+    if f_hash:
+        params.append(("f", f_hash))
     params.extend((f"params[{key}]", value) for key, value in category.api_params)
     return f"{ITEMS_API_URL}?{urlencode(params)}"
 

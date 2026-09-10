@@ -80,8 +80,22 @@ def test_all_categories_requires_query() -> None:
 def test_api_url_built_locally(region: str, category: str, expected: list[str]) -> None:
     url = catalog.build_api_url(region, category)
     assert url is not None
-    for fragment in [*expected, "sort=date", "privateOnly=1", "owner%5B%5D=private"]:
+    for fragment in [*expected, "s=104", "sort=date", "privateOnly=1", "owner%5B%5D=private", "user=1"]:
         assert fragment in url
+    assert "presentationType" not in url
+
+
+def test_api_url_passes_catalog_filter_hash() -> None:
+    """Иначе Avito игнорирует owner[] и сыплет магазинами."""
+    url = catalog.build_api_url("moskva", catalog.IPHONE_CATEGORY_ID)
+    assert url is not None
+    assert "f=ASgBAgICAkS0wA3OqzmwwQ2I_Dc" in url
+
+
+def test_tablets_api_url_uses_extra_filter_hash() -> None:
+    url = catalog.build_api_url("moskva", "tablets")
+    assert url is not None
+    assert "f=ASgBAgICAkSYAoZOwPgO~qagDw" in url or "f=ASgBAgICAkSYAoZOwPgO%7EqagDw" in url
 
 
 def test_all_categories_api_url_has_query_and_no_category() -> None:
@@ -89,9 +103,11 @@ def test_all_categories_api_url_has_query_and_no_category() -> None:
     assert url is not None
     assert "categoryId=" not in url
     assert "q=iphone" in url
+    assert "s=104" in url
     assert "sort=date" in url
     assert "privateOnly=1" in url
     assert "owner%5B%5D=private" in url
+    assert "user=1" in url
     assert "locationId=637640" in url
 
 

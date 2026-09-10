@@ -246,14 +246,14 @@ def seller_profile_links(item: dict) -> list[str]:
 def is_company_seller(item: dict) -> bool:
     """Магазин или бренд, а не частное лицо.
 
-    ``shopId`` у Avito бывает и у частников с корзиной и доставкой — на карточке
-    при этом написано «Частное лицо». Смотрим только ссылку профиля.
+    ``shopId`` и блок корзины ``ShopInfoStep`` бывают и у частников с доставкой —
+    на карточке при этом написано «Частное лицо». Если есть профиль ``/user/``,
+    это частник: ссылка ``/shop/`` у корзины его не перебивает.
     """
-    return any(
-        marker in link.lower()
-        for link in seller_profile_links(item)
-        for marker in _COMPANY_URL_MARKERS
-    )
+    links = [link.lower() for link in seller_profile_links(item)]
+    if any("/user/" in link for link in links):
+        return False
+    return any(marker in link for link in links for marker in _COMPANY_URL_MARKERS)
 
 
 def is_private_seller(item: dict) -> bool:
