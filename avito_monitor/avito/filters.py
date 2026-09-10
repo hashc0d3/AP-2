@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from avito_monitor.avito import iphone  # noqa: F401 — вернём вместе с фильтрами выдачи
+from avito_monitor.avito import iphone  # noqa: F401 — вернём вместе с фильтром моделей
 from avito_monitor.avito import items as items_mod
 from avito_monitor.config import Settings
 
@@ -102,21 +102,19 @@ def select_new_ads(
 ) -> tuple[list[dict], FilterStats]:
     """Выбрать объявления для ленты.
 
-    Первый цикл кладёт в ленту всю текущую выдачу. Дальше — любой ID,
-    которого ещё не было: иначе свежие карточки с чуть старой меткой
-    Avito отсекались как «раньше старта», и лента замирала.
+    Первый цикл кладёт текущую выдачу в ленту. Дальше — любой новый ID.
+    Магазины и платное продвижение скрываем: частные без «Продвинуто».
+    Если бейдж стоит на всей странице JSON, это ложный VAS — не прячем.
 
     Возвращает объявления от свежих к старым и статистику отбора.
     """
     stats = FilterStats(total=len(items))
     selected: list[dict] = []
-    _ = (settings, started_at)
-    # hide_promoted = settings.ignore_promotion and not items_mod.all_items_promoted(items)
-    # if settings.ignore_promotion and not hide_promoted and items:
-    #     stats.promotion_badge_ignored = True
-    # hide_companies = settings.private_only and not items_mod.all_items_are_companies(items)
-    # if settings.private_only and not hide_companies and items:
-    #     stats.company_filter_ignored = True
+    _ = started_at
+    hide_promoted = settings.ignore_promotion and not items_mod.all_items_promoted(items)
+    if settings.ignore_promotion and not hide_promoted and items:
+        stats.promotion_badge_ignored = True
+    hide_companies = settings.private_only
 
     for item in items:
         ad_id = items_mod.item_id(item)
@@ -124,19 +122,19 @@ def select_new_ads(
             continue
         already_seen = ad_id in seen
 
-        # if hide_promoted and items_mod.is_promoted(item):
-        #     seen.add(ad_id)
-        #     stats.promoted += 1
-        #     continue
+        if hide_promoted and items_mod.is_promoted(item):
+            seen.add(ad_id)
+            stats.promoted += 1
+            continue
         # if seller_is_skipped(item, settings.seller_skip):
         #     stats.seller_skipped += 1
         #     continue
-        # if hide_companies and not seller_is_allowed(item, private_only=True):
-        #     stats.company += 1
-        #     if len(stats.company_hints) < 3:
-        #         links = items_mod.seller_profile_links(item)
-        #         stats.company_hints.append(f"{ad_id} {links[0] if links else 'без ссылки'}")
-        #     continue
+        if hide_companies and not seller_is_allowed(item, private_only=True):
+            stats.company += 1
+            if len(stats.company_hints) < 3:
+                links = items_mod.seller_profile_links(item)
+                stats.company_hints.append(f"{ad_id} {links[0] if links else 'без ссылки'}")
+            continue
         # if not title_matches(item, settings.title_must_contain, settings.title_skip):
         #     stats.title += 1
         #     continue
@@ -151,9 +149,6 @@ def select_new_ads(
         if already_seen:
             stats.already_seen += 1
             continue
-        # if not first_run and started_at and not _published_after(item, started_at):
-        #     stats.before_start += 1
-        #     continue
         seen.add(ad_id)
         selected.append(item)
         if first_run:

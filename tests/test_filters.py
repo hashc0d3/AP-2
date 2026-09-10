@@ -94,8 +94,7 @@ def test_shop_profile_passes_private_only(base_settings: Settings) -> None:
     assert stats.company == 0
 
 
-def test_listing_pass_through_keeps_companies_and_promoted(base_settings: Settings) -> None:
-    """Пока фильтры выдачи выключены — в ленту всё новое, по дате."""
+def test_private_only_hides_companies_and_promoted(base_settings: Settings) -> None:
     settings = replace(base_settings, private_only=True, ignore_promotion=True)
     company = _with_seller(COMPANY, **{"id": 1, "age": 40})
     promoted = _ad(
@@ -103,12 +102,14 @@ def test_listing_pass_through_keeps_companies_and_promoted(base_settings: Settin
         age=10,
         iva={"DateInfoStep": [{"payload": {"vas": [{"title": "Продвинуто"}]}}]},
     )
+    seen: set[int] = set()
     selected, stats = filters.select_new_ads(
-        [company, promoted], settings, set(), first_run=False
+        [company, promoted], settings, seen, first_run=False
     )
-    assert [ad["id"] for ad in selected] == [2, 1]
-    assert stats.company == 0
-    assert stats.promoted == 0
+    assert selected == []
+    assert stats.company == 1
+    assert stats.promoted == 1
+    assert seen == {2}
 
 
 def test_delivery_shop_without_user_profile_is_allowed() -> None:
@@ -157,39 +158,39 @@ def test_later_runs_show_only_unseen(base_settings: Settings) -> None:
     assert stats.already_seen == 2
 
 
-def test_company_ads_pass_while_listing_filters_are_off(base_settings: Settings) -> None:
+def test_company_ads_are_hidden_when_private_only(base_settings: Settings) -> None:
     settings = replace(base_settings, private_only=True)
     company = _with_seller(COMPANY)
     seen: set[int] = set()
     selected, stats = filters.select_new_ads([company], settings, seen, first_run=False)
-    assert [ad["id"] for ad in selected] == [1]
-    assert stats.company == 0
-    assert seen == {1}
+    assert selected == []
+    assert stats.company == 1
+    assert seen == set()
 
 
 def test_promoted_ads_are_remembered_so_they_dont_resurface(base_settings: Settings) -> None:
-    """На старте показываем выдачу, в том числе с бейджем «Продвинуто»."""
+    """Продвинутое прячем и запоминаем, иначе оно всплывёт позже как новое."""
     promoted = _ad(9, age=20, iva={"DateInfoStep": [{"payload": {"vas": [{"title": "Продвинуто"}]}}]})
     ordinary = _ad(8, age=10)
     seen: set[int] = set()
     selected, stats = filters.select_new_ads(
         [promoted, ordinary], base_settings, seen, first_run=True
     )
-    assert [ad["id"] for ad in selected] == [8, 9]
-    assert stats.promoted == 0
-    assert stats.baseline == 2
+    assert [ad["id"] for ad in selected] == [8]
+    assert stats.promoted == 1
+    assert stats.baseline == 1
     assert seen == {8, 9}
 
 
 def test_all_promoted_page_is_not_hidden(base_settings: Settings) -> None:
-    """Бейдж на карточке больше не прячет объявление."""
+    """Бейдж на каждой карточке JSON — ложный, на сайте те же объявления обычные."""
     badge = {"DateInfoStep": [{"payload": {"vas": [{"title": "Продвинуто"}]}}]}
     selected, stats = filters.select_new_ads(
         [_ad(1, iva=badge), _ad(2, iva=badge)], base_settings, set(), first_run=False
     )
     assert {ad["id"] for ad in selected} == {1, 2}
     assert stats.promoted == 0
-    assert stats.promotion_badge_ignored is False
+    assert stats.promotion_badge_ignored is True
 
 
 def test_promoted_can_be_allowed(base_settings: Settings) -> None:
