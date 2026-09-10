@@ -65,3 +65,5 @@ def test_runtime_settings_strip_paid_serp() -> None:
     assert "presentationType" not in runtime.api_url
     assert "sort=" not in runtime.api_url
     assert "s=104" in runtime.api_url
+    assert "owner" not in runtime.api_url
+    assert "privateOnly=" not in runtime.api_url

@@ -94,6 +94,23 @@ def test_shop_profile_passes_private_only(base_settings: Settings) -> None:
     assert stats.company == 0
 
 
+def test_listing_pass_through_keeps_companies_and_promoted(base_settings: Settings) -> None:
+    """Пока фильтры выдачи выключены — в ленту всё новое, по дате."""
+    settings = replace(base_settings, private_only=True, ignore_promotion=True)
+    company = _with_seller(COMPANY, **{"id": 1, "age": 40})
+    promoted = _ad(
+        2,
+        age=10,
+        iva={"DateInfoStep": [{"payload": {"vas": [{"title": "Продвинуто"}]}}]},
+    )
+    selected, stats = filters.select_new_ads(
+        [company, promoted], settings, set(), first_run=False
+    )
+    assert [ad["id"] for ad in selected] == [2, 1]
+    assert stats.company == 0
+    assert stats.promoted == 0
+
+
 def test_delivery_shop_without_user_profile_is_allowed() -> None:
     """Иначе новые частные объявления пропадали как «компания»."""
     item = _ad(iva={"ShopInfoStep": [{"payload": {"link": "/shop/delivery"}}]}, shopId=99)
@@ -126,24 +143,18 @@ def test_later_runs_show_only_unseen(base_settings: Settings) -> None:
     assert stats.already_seen == 2
 
 
-def test_rejected_non_promo_ads_can_surface_later(base_settings: Settings) -> None:
-    """Ложный «магазин» не должен навсегда закрыть карточку."""
+def test_company_ads_pass_while_listing_filters_are_off(base_settings: Settings) -> None:
     settings = replace(base_settings, private_only=True)
     company = _with_seller(COMPANY)
     seen: set[int] = set()
     selected, stats = filters.select_new_ads([company], settings, seen, first_run=False)
-    assert selected == []
-    assert stats.company == 1
-    assert seen == set()
-
-    private = _with_seller(PRIVATE, **{"id": 1})
-    selected, _ = filters.select_new_ads([private], settings, seen, first_run=False)
     assert [ad["id"] for ad in selected] == [1]
+    assert stats.company == 0
     assert seen == {1}
 
 
 def test_promoted_ads_are_remembered_so_they_dont_resurface(base_settings: Settings) -> None:
-    """Иначе продвинутое объявление всплывёт позже как новое."""
+    """На старте запоминаем всю выдачу, в том числе с бейджем «Продвинуто»."""
     promoted = _ad(9, iva={"DateInfoStep": [{"payload": {"vas": [{"title": "Продвинуто"}]}}]})
     ordinary = _ad(8)
     seen: set[int] = set()
@@ -151,20 +162,20 @@ def test_promoted_ads_are_remembered_so_they_dont_resurface(base_settings: Setti
         [promoted, ordinary], base_settings, seen, first_run=True
     )
     assert selected == []
-    assert stats.promoted == 1
-    assert stats.baseline == 1
+    assert stats.promoted == 0
+    assert stats.baseline == 2
     assert seen == {8, 9}
 
 
 def test_all_promoted_page_is_not_hidden(base_settings: Settings) -> None:
-    """Бейдж на каждой карточке JSON — ложный, на сайте те же объявления обычные."""
+    """Бейдж на карточке больше не прячет объявление."""
     badge = {"DateInfoStep": [{"payload": {"vas": [{"title": "Продвинуто"}]}}]}
     selected, stats = filters.select_new_ads(
         [_ad(1, iva=badge), _ad(2, iva=badge)], base_settings, set(), first_run=False
     )
     assert {ad["id"] for ad in selected} == {1, 2}
     assert stats.promoted == 0
-    assert stats.promotion_badge_ignored is True
+    assert stats.promotion_badge_ignored is False
 
 
 def test_promoted_can_be_allowed(base_settings: Settings) -> None:
@@ -220,12 +231,12 @@ def test_ads_without_timestamp_are_not_new(base_settings: Settings) -> None:
     assert stats.before_start == 1
 
 
-def test_iphone_model_filter_applies(base_settings: Settings) -> None:
+def test_iphone_model_filter_is_off_with_listing_pass_through(base_settings: Settings) -> None:
     settings = replace(base_settings, iphone_models=("13-pro",), category_id="apple_phones")
     ads = [_ad(1, title="iPhone 13 Pro"), _ad(2, title="iPhone 14 Pro")]
     selected, stats = filters.select_new_ads(ads, settings, set(), first_run=False)
-    assert [ad["id"] for ad in selected] == [1]
-    assert stats.iphone_model == 1
+    assert {ad["id"] for ad in selected} == {1, 2}
+    assert stats.iphone_model == 0
 
 
 def test_iphone_model_filter_ignored_for_tablets(base_settings: Settings) -> None:

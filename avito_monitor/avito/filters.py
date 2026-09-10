@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from avito_monitor.avito import iphone
+from avito_monitor.avito import iphone  # noqa: F401 — вернём вместе с фильтрами выдачи
 from avito_monitor.avito import items as items_mod
 from avito_monitor.config import Settings
 
@@ -103,25 +103,21 @@ def select_new_ads(
     """Выбрать объявления для ленты.
 
     Первый цикл только запоминает текущую выдачу: в ленту ничего не кладём.
-    Дальше показываем только то, что опубликовано после «Начать поиск» и
-    чего не было на старте. Старое объявление, всплывшее на второй странице
-    или после смены выдачи, в ленту не попадает.
-
-    ``seen`` пополняется объявлениями, которые мы **показали** или запомнили
-    на старте, и платным продвижением: его Avito поднимает повторно, и без
-    памяти оно снова выглядело бы новым. Остальные отказы (компания,
-    название) в память не пишем — иначе ложный отсев навсегда прячет карточку.
+    Дальше показываем всё, что пришло в JSON после «Начать поиск» и чего
+    не было на старте. Фильтры компаний, частных, промо, названия и модели
+    временно выключены — иначе ложный отсев прятал живые карточки.
 
     Возвращает объявления от свежих к старым и статистику отбора.
     """
     stats = FilterStats(total=len(items))
     selected: list[dict] = []
-    hide_promoted = settings.ignore_promotion and not items_mod.all_items_promoted(items)
-    if settings.ignore_promotion and not hide_promoted and items:
-        stats.promotion_badge_ignored = True
-    hide_companies = settings.private_only and not items_mod.all_items_are_companies(items)
-    if settings.private_only and not hide_companies and items:
-        stats.company_filter_ignored = True
+    _ = settings
+    # hide_promoted = settings.ignore_promotion and not items_mod.all_items_promoted(items)
+    # if settings.ignore_promotion and not hide_promoted and items:
+    #     stats.promotion_badge_ignored = True
+    # hide_companies = settings.private_only and not items_mod.all_items_are_companies(items)
+    # if settings.private_only and not hide_companies and items:
+    #     stats.company_filter_ignored = True
 
     for item in items:
         ad_id = items_mod.item_id(item)
@@ -129,30 +125,30 @@ def select_new_ads(
             continue
         already_seen = ad_id in seen
 
-        if hide_promoted and items_mod.is_promoted(item):
-            seen.add(ad_id)
-            stats.promoted += 1
-            continue
-        if seller_is_skipped(item, settings.seller_skip):
-            stats.seller_skipped += 1
-            continue
-        if hide_companies and not seller_is_allowed(item, private_only=True):
-            stats.company += 1
-            if len(stats.company_hints) < 3:
-                links = items_mod.seller_profile_links(item)
-                stats.company_hints.append(f"{ad_id} {links[0] if links else 'без ссылки'}")
-            continue
-        if not title_matches(item, settings.title_must_contain, settings.title_skip):
-            stats.title += 1
-            continue
-        if settings.filters_iphone_models and not iphone.model_allowed(
-            item.get("title") or "",
-            settings.iphone_models,
-            min_gen=settings.iphone_min_model,
-            max_gen=settings.iphone_max_model,
-        ):
-            stats.iphone_model += 1
-            continue
+        # if hide_promoted and items_mod.is_promoted(item):
+        #     seen.add(ad_id)
+        #     stats.promoted += 1
+        #     continue
+        # if seller_is_skipped(item, settings.seller_skip):
+        #     stats.seller_skipped += 1
+        #     continue
+        # if hide_companies and not seller_is_allowed(item, private_only=True):
+        #     stats.company += 1
+        #     if len(stats.company_hints) < 3:
+        #         links = items_mod.seller_profile_links(item)
+        #         stats.company_hints.append(f"{ad_id} {links[0] if links else 'без ссылки'}")
+        #     continue
+        # if not title_matches(item, settings.title_must_contain, settings.title_skip):
+        #     stats.title += 1
+        #     continue
+        # if settings.filters_iphone_models and not iphone.model_allowed(
+        #     item.get("title") or "",
+        #     settings.iphone_models,
+        #     min_gen=settings.iphone_min_model,
+        #     max_gen=settings.iphone_max_model,
+        # ):
+        #     stats.iphone_model += 1
+        #     continue
         if first_run:
             seen.add(ad_id)
             stats.baseline += 1

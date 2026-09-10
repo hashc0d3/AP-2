@@ -21,7 +21,7 @@ def test_web_url_uses_region_and_category_path() -> None:
     assert "igrovye_pristavki/igrovye_pristavki-ASgBAgICAkSSAsoJ9M0UmsqPAw" in url
     assert "localPriority=0" in url
     assert "s=104" in url
-    assert "owner[]=private" in url
+    assert "owner[]=private" not in url
 
 
 def test_moscow_city_and_moscow_area_are_different_urls() -> None:
@@ -50,13 +50,13 @@ def test_unknown_category_is_rejected() -> None:
 
 
 def test_all_categories_web_url_has_region_date_and_private() -> None:
-    """Без категории остаётся регион, свежие и только частные."""
+    """Без категории остаётся регион и сортировка по дате."""
     url = catalog.build_web_url("iphone 15", "kazan", catalog.ALL_CATEGORY_ID)
     assert url.startswith("https://www.avito.ru/kazan?")
     assert "/telefony" not in url
     assert "q=iphone%2015" in url
     assert "s=104" in url
-    assert "owner[]=private" in url
+    assert "owner[]=private" not in url
 
 
 def test_all_categories_requires_query() -> None:
@@ -80,14 +80,17 @@ def test_all_categories_requires_query() -> None:
 def test_api_url_built_locally(region: str, category: str, expected: list[str]) -> None:
     url = catalog.build_api_url(region, category)
     assert url is not None
-    for fragment in [*expected, "s=104", "privateOnly=1", "owner%5B%5D=private", "user=1"]:
+    for fragment in [*expected, "s=104"]:
         assert fragment in url
+    assert "privateOnly=" not in url
+    assert "owner" not in url
+    assert "user=1" not in url
     assert "presentationType" not in url
     assert "sort=date" not in url
 
 
 def test_api_url_passes_catalog_filter_hash() -> None:
-    """Иначе Avito игнорирует owner[] и сыплет магазинами."""
+    """Хеш категории должен попасть в JSON API."""
     url = catalog.build_api_url("moskva", catalog.IPHONE_CATEGORY_ID)
     assert url is not None
     assert "f=ASgBAgICAkS0wA3OqzmwwQ2I_Dc" in url
@@ -105,9 +108,9 @@ def test_all_categories_api_url_has_query_and_no_category() -> None:
     assert "categoryId=" not in url
     assert "q=iphone" in url
     assert "s=104" in url
-    assert "privateOnly=1" in url
-    assert "owner%5B%5D=private" in url
-    assert "user=1" in url
+    assert "privateOnly=" not in url
+    assert "owner" not in url
+    assert "user=1" not in url
     assert "locationId=637640" in url
 
 
@@ -133,13 +136,17 @@ def test_normalize_always_forces_date_sort() -> None:
     assert "s=1" not in clean.replace("s=104", "")
 
 
-def test_normalize_adds_private_filter_when_missing() -> None:
-    """Без owner[] JSON сыплет магазинами, и частные объявления не видны."""
-    dirty = "https://www.avito.ru/web/1/js/items?locationId=637640&s=104"
+def test_normalize_strips_private_filter() -> None:
+    """Пока смотрим всю выдачу по дате, owner[] и privateOnly мешают."""
+    dirty = (
+        "https://www.avito.ru/web/1/js/items?locationId=637640&s=104"
+        "&owner[]=private&privateOnly=1&user=1"
+    )
     clean = catalog.normalize_items_api_url(dirty)
-    assert "owner%5B%5D=private" in clean
-    assert "privateOnly=1" in clean
-    assert "user=1" in clean
+    assert "owner" not in clean
+    assert "privateOnly=" not in clean
+    assert "user=1" not in clean
+    assert "s=104" in clean
 
 
 def test_normalize_drops_serp_mixers() -> None:
@@ -151,8 +158,9 @@ def test_normalize_drops_serp_mixers() -> None:
     assert "presentationType" not in clean
     assert "sort=" not in clean
     assert "s=104" in clean
-    assert "privateOnly=1" in clean
-    assert "user=1" in clean
+    assert "privateOnly=" not in clean
+    assert "user=1" not in clean
+    assert "owner" not in clean
 
 
 def test_api_url_from_pasted_apple_link() -> None:
