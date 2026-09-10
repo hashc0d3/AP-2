@@ -5,12 +5,15 @@
 соединение (keep-alive). Наборы при этом честно чередуются: каждый бьёт
 Avito не чаще, чем позволяет ``per_cookie_interval``.
 
+Канал набору выдаёт :data:`~avito_monitor.net.proxies.PROXY_POOL`: пока
+прокси несколько, наборы разложены по ним поровну, и бан одного канала
+не рвёт соединения наборов, которые сидят на другом.
+
 Клиент пересоздаётся, когда:
 
 * набор пропал из пула или сервис перевыпустил ему cookies;
 * набор сгорел (:meth:`CookieRing.burn`);
-* сменился IP — старые соединения после этого мертвы
-  (:meth:`CookieRing.reset_clients`);
+* набор переехал на другой канал — соединение было к старому прокси;
 * клиент прожил дольше :data:`CookieRing.CLIENT_MAX_AGE` — за это время
   Avito подмешивает свои cookies, и набор лучше вернуть к исходному.
 """
@@ -24,7 +27,7 @@ from loguru import logger
 from avito_monitor.config import Settings
 from avito_monitor.cookies import pool
 from avito_monitor.net.client import Session, build_client
-from avito_monitor.net.proxies import current_proxy_string
+from avito_monitor.net.proxies import PROXY_POOL
 
 
 class CookieRing:
@@ -37,9 +40,11 @@ class CookieRing:
     """Максимальный срок жизни соединения на один набор."""
 
     def __init__(self, settings: Settings) -> None:
-        self._proxy = current_proxy_string(settings.proxy_string)
+        self._fallback_proxy = settings.proxy_string
+        """Прокси на случай, если пул ещё не настроен."""
         self._clients: dict[str, Session] = {}
         self._created_at: dict[str, float] = {}
+        self._proxy_of: dict[str, str] = {}
         self._slots: dict[str, dict] = {}
         self._order: list[str] = []
         self._index = 0
@@ -51,8 +56,9 @@ class CookieRing:
         """Перечитать пул с диска. Возвращает число готовых наборов."""
         fresh = {str(slot["id"]): slot for slot in pool.usable_slots()}
 
-        for gone in set(self._clients) - set(fresh):
+        for gone in set(self._slots) - set(fresh):
             self._close(gone)
+            PROXY_POOL.release(gone)
 
         # Сервис мог перевыпустить cookies — тогда клиент держит старые.
         for key, slot in fresh.items():
@@ -79,6 +85,7 @@ class CookieRing:
 
     def _close(self, cookie_id: str) -> None:
         self._created_at.pop(cookie_id, None)
+        self._proxy_of.pop(cookie_id, None)
         client = self._clients.pop(cookie_id, None)
         if client is None:
             return
@@ -88,29 +95,31 @@ class CookieRing:
             logger.debug(f"Кольцо: клиент id={cookie_id} не закрылся — {err}")
 
     def reset_clients(self) -> None:
-        """Забыть все соединения: после смены IP или прокси они мертвы."""
+        """Забыть все соединения: после сбоя сети они могут быть мертвы."""
         for cookie_id in list(self._clients):
             self._close(cookie_id)
 
-    def use_current_proxy(self) -> None:
-        """Перейти на рабочий сейчас прокси и сбросить старые соединения."""
-        incoming = current_proxy_string(self._proxy)
-        if incoming == self._proxy:
-            self.reset_clients()
-            return
-        self._proxy = incoming
-        self.reset_clients()
+    def proxy_of(self, slot: dict) -> str:
+        """Канал, через который набор ходил в прошлый раз."""
+        return self._proxy_of.get(str(slot.get("id")), "")
 
     def client_for(self, slot: dict) -> Session:
-        """Клиент для набора: существующий или новый."""
+        """Клиент для набора на его канале: существующий или новый.
+
+        Пул мог увести набор на соседний прокси, пока этот меняет IP, —
+        тогда старое соединение уже никуда не ведёт и клиент пересобирается.
+        """
         key = str(slot.get("id"))
-        if time.time() - self._created_at.get(key, 0.0) > self.CLIENT_MAX_AGE:
+        proxy = PROXY_POOL.proxy_for(key) or self._fallback_proxy
+        expired = time.time() - self._created_at.get(key, 0.0) > self.CLIENT_MAX_AGE
+        if expired or self._proxy_of.get(key) != proxy:
             self._close(key)
         client = self._clients.get(key)
         if client is None:
-            client = build_client(slot, self._proxy)
+            client = build_client(slot, proxy)
             self._clients[key] = client
             self._created_at[key] = time.time()
+            self._proxy_of[key] = proxy
         return client
 
     # ── Выдача ──────────────────────────────────────────────────────────
@@ -120,6 +129,7 @@ class CookieRing:
         key = str(cookie_id)
         pool.mark_blocked(cookie_id)
         self._close(key)
+        PROXY_POOL.release(key)
         self._slots.pop(key, None)
         if key in self._order:
             self._order.remove(key)

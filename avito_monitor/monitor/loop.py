@@ -4,7 +4,7 @@
 
 1. взять следующий набор cookies из кольца;
 2. запросить страницы выдачи;
-3. при отказе Avito — сменить IP или набор и попробовать снова;
+3. при отказе Avito — увести набор на соседний прокси или взять другой набор;
 4. отфильтровать выдачу и отдать новое в веб-ленту;
 5. выдержать паузу, размер которой определяет :mod:`~.pacer`.
 
@@ -62,12 +62,6 @@ class CycleResult:
     """Avito ограничивал запросы — стоит сбавить темп."""
 
 
-def _rotate_ip(ring: CookieRing, reason: str) -> None:
-    """Уйти на соседний прокси; на заблокированном сменить IP в фоне."""
-    PROXY_POOL.failover(reason)
-    ring.use_current_proxy()
-
-
 def _fetch_page(client: object, url: str, timeout: float):
     """Страница выдачи: при двух прокси не повторяем запрос в мёртвый туннель."""
     attempts = 1 if PROXY_POOL.size >= 2 else net_client.DEFAULT_ATTEMPTS
@@ -75,10 +69,14 @@ def _fetch_page(client: object, url: str, timeout: float):
 
 
 def _recover_empty_pool(settings: Settings, ring: CookieRing, reason: str) -> tuple[dict | None, object]:
-    """Нет рабочих cookies — сразу сменить IP и докупить набор."""
+    """Нет рабочих cookies — докупить набор.
+
+    IP при этом не трогаем: сгоревшие cookies — не проблема адреса, а
+    покупка нового набора как раз идёт через живой прокси.
+    """
     from avito_monitor.cookies import pool
 
-    _rotate_ip(ring, reason)
+    logger.warning(reason)
     try:
         pool.replenish_if_empty(settings)
     except Exception as err:
@@ -97,23 +95,23 @@ def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
     result = CycleResult()
     slot, client = ring.next()
     if slot is None or client is None:
-        slot, client = _recover_empty_pool(
-            settings, ring, "Нет рабочих cookies — сразу меняю IP и докупаю"
-        )
+        slot, client = _recover_empty_pool(settings, ring, "Нет рабочих cookies — докупаю")
     if slot is None or client is None:
         logger.error("Нет готового cookie — не бью Avito заблокированным набором")
         return CycleResult(failed=True)
 
-    logger.info(f"Цикл на cookie id={slot.get('id')} [{ring.position()}]")
+    proxy = ring.proxy_of(slot).rsplit("@", 1)[-1] or "без прокси"
+    logger.info(f"Цикл на cookie id={slot.get('id')} [{ring.position()}] через {proxy}")
     collected: dict[int, dict] = {}
     rotated = False
 
     def rotate(reason: str) -> bool:
+        """Увести набор с забаненного канала; тот меняет IP в фоне."""
         nonlocal rotated, client
         if rotated:
             logger.warning(f"{reason}: в этом цикле уже уходили на соседний, оставляю собранное")
             return False
-        _rotate_ip(ring, reason)
+        PROXY_POOL.ban(ring.proxy_of(slot), reason)
         rotated = True
         client = ring.client_for(slot)
         return True
@@ -146,8 +144,7 @@ def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
             if status == net_client.RATE_LIMITED:
                 result.failed = True
                 logger.warning("429 и на соседнем прокси — меняю его IP и отдаю цикл")
-                PROXY_POOL.failover("429 на запасном канале", wait=False)
-                ring.use_current_proxy()
+                PROXY_POOL.ban(ring.proxy_of(slot), "429 на соседнем канале", wait=False)
                 break
 
         if status in net_client.COOKIE_BLOCKED:
@@ -157,9 +154,7 @@ def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
             logger.warning(f"{status}: cookie id={burned} сгорел, IP не меняю, беру другой набор")
             slot, client = ring.next()
             if slot is None or client is None:
-                slot, client = _recover_empty_pool(
-                    settings, ring, "Все cookies сгорели — сразу меняю IP и докупаю"
-                )
+                slot, client = _recover_empty_pool(settings, ring, "Все cookies сгорели — докупаю")
             if slot is None or client is None:
                 logger.error("Пул не дал готовый набор после блокировки")
                 return CycleResult(status=status, failed=True, throttled=True)
@@ -313,11 +308,12 @@ def _monitor_search(settings: Settings, ring: CookieRing, seen: SeenStore, gener
                 publish_ads([items_mod.serialize_ad(item, tz_name=tz_name) for item in selected])
             first_run = False
         except Exception as err:
-            # Любая неожиданная ошибка не должна останавливать мониторинг:
-            # переключаем прокси и пробуем следующий цикл.
+            # Любая неожиданная ошибка не должна останавливать мониторинг.
+            # IP не меняем: он тут обычно ни при чём, а вот соединения после
+            # такого сбоя лучше считать мёртвыми.
             failed = True
             logger.error(f"Ошибка цикла: {err}")
-            _rotate_ip(ring, "Восстанавливаюсь после ошибки цикла")
+            ring.reset_clients()
 
         if failed or throttled:
             pacer.on_throttle()
@@ -351,6 +347,7 @@ def main() -> None:
     migrate_legacy_session()
     warn_about_weak_password()
 
+    PROXY_POOL.change_wait = settings.ip_change_wait
     PROXY_POOL.configure(settings.proxy_endpoints())
     service.start_background(settings)
     ensure_proxy_bypasses_vpn()

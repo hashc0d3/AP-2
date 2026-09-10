@@ -1,14 +1,17 @@
-"""Набор мобильных прокси: рабочий сейчас и соседний на подхвате.
+"""Мобильные прокси: наборы cookies поделены между живыми каналами.
 
-При бане IP уходим на соседний канал, только если он уже остыл. Иначе
-ждём новый адрес на текущем: прыжок на только что использованный IP
-сразу даёт второй 429 и пустой цикл. Когда прокси один — только смена IP.
+Каналы работают параллельно, а не по очереди. Набор cookies закреплён за
+своим прокси, поэтому его соединение (keep-alive) живёт между циклами, а
+каждый IP получает лишь свою долю запросов и реже ловит 429.
+
+Забаненный канал уходит менять адрес в фоне, его наборы на это время
+переезжают к соседу — опрос не останавливается. Ждём новый IP, только когда
+свободных каналов не осталось.
 """
 
 from __future__ import annotations
 
 import threading
-import time
 
 from loguru import logger
 
@@ -20,17 +23,20 @@ def _label(proxy_string: str) -> str:
     return proxy_string.rsplit("@", 1)[-1] or "прокси"
 
 
-class ProxySlot:
-    __slots__ = ("proxy_string", "change_url", "changing", "cooling_until", "last_used", "ready")
+class ProxyChannel:
+    """Один мобильный прокси и состояние смены его IP."""
+
+    __slots__ = ("change_url", "changing", "leases", "proxy_string", "ready")
 
     def __init__(self, proxy_string: str, change_url: str) -> None:
         self.proxy_string = proxy_string
         self.change_url = change_url
         self.changing = False
-        self.cooling_until = 0.0
-        self.last_used = 0.0
         self.ready = threading.Event()
         self.ready.set()
+        # Сколько наборов cookies закреплено за каналом — по этому числу
+        # раскладываем нагрузку поровну.
+        self.leases = 0
 
     @property
     def label(self) -> str:
@@ -38,134 +44,183 @@ class ProxySlot:
 
 
 class ProxyPool:
-    """Круг из одного или нескольких прокси."""
+    """Все настроенные прокси и раскладка наборов cookies по ним."""
 
     def __init__(self) -> None:
-        self._slots: list[ProxySlot] = []
-        self._index = 0
+        self._channels: list[ProxyChannel] = []
+        self._leases: dict[str, ProxyChannel] = {}
         self._lock = threading.Lock()
         self.change_wait = 12.0
         """Сколько ждать подъёма туннеля после смены IP."""
-        self.cooldown = 5.0
-        """Не возвращаться на канал раньше чем через столько секунд после использования."""
 
     def configure(self, endpoints: tuple[tuple[str, str], ...]) -> None:
-        slots = [
-            ProxySlot(proxy_string, change_url)
+        channels = [
+            ProxyChannel(proxy_string, change_url)
             for proxy_string, change_url in endpoints
             if proxy_string
         ]
         with self._lock:
-            self._slots = slots
-            self._index = 0
-        if not slots:
+            self._channels = channels
+            self._leases.clear()
+        if not channels:
             logger.warning("Прокси не настроены")
             return
-        names = ", ".join(slot.label for slot in slots)
-        logger.info(f"Прокси в работе: {len(slots)} ({names})")
+        names = ", ".join(channel.label for channel in channels)
+        logger.info(f"Прокси в работе: {len(channels)} ({names})")
 
     @property
     def size(self) -> int:
         with self._lock:
-            return len(self._slots)
+            return len(self._channels)
 
-    def current(self) -> ProxySlot | None:
+    def proxy_for(self, key: str) -> str:
+        """Канал набора cookies: закреплённый, пока он жив, иначе новый.
+
+        Набор без канала садится на самый свободный, поэтому при двух прокси
+        запросы делятся между ними примерно поровну.
+        """
         with self._lock:
-            if not self._slots:
-                return None
-            return self._slots[self._index]
+            leased = self._leases.get(key)
+            if leased is not None and not leased.changing:
+                return leased.proxy_string
+            chosen = self._least_busy()
+            if chosen is None:
+                return ""
+            if chosen is not leased:
+                self._lease(key, chosen)
+            return chosen.proxy_string
+
+    def release(self, key: str) -> None:
+        """Набор ушёл из кольца — освободить его место на канале."""
+        with self._lock:
+            channel = self._leases.pop(key, None)
+            if channel is not None:
+                channel.leases -= 1
 
     def current_string(self) -> str:
-        slot = self.current()
-        return slot.proxy_string if slot else ""
-
-    def failover(self, reason: str, *, wait: bool = True) -> None:
-        """Уйти на остывший соседний прокси или ждать новый IP на текущем."""
-        wait_for: ProxySlot | None = None
-        banned: ProxySlot | None = None
+        """Живой канал для разовых запросов вне кольца: покупка cookies, номер."""
         with self._lock:
-            if not self._slots:
+            channel = self._least_busy()
+            return channel.proxy_string if channel else ""
+
+    def ban(self, proxy_string: str, reason: str, *, wait: bool = True) -> None:
+        """Канал поймал бан: сменить ему IP в фоне, наборы отдать соседям.
+
+        :param proxy_string: канал, на котором пришёл отказ; пустая строка —
+            выбрать самый свободный.
+        :param wait: ждать новый IP, если работать больше не на чем.
+        """
+        with self._lock:
+            channel = self._channel(proxy_string) or self._least_busy()
+            if channel is None:
                 logger.warning(f"{reason}: прокси не настроены")
                 return
-            leaving = self._slots[self._index]
-            leaving.last_used = time.time()
-            incoming = leaving
-            if len(self._slots) > 1:
-                incoming = self._pick_incoming(leaving)
-                if incoming is not leaving:
-                    self._index = self._slots.index(incoming)
-                    logger.warning(
-                        f"{reason}: {leaving.label} откладываю, работаю через {incoming.label}"
-                    )
-                    if not incoming.ready.is_set():
-                        wait_for = incoming
-                else:
-                    logger.warning(
-                        f"{reason}: соседний прокси ещё горячий, "
-                        f"жду новый IP на {leaving.label}"
-                    )
-                    wait_for = leaving
+
+            spare = [
+                other
+                for other in self._channels
+                if other is not channel and not other.changing
+            ]
+            if spare:
+                names = ", ".join(other.label for other in spare)
+                logger.warning(f"{reason}: {channel.label} меняет IP, наборы уходят на {names}")
+            elif len(self._channels) > 1:
+                logger.warning(f"{reason}: свободных каналов нет, жду новый IP на {channel.label}")
             else:
-                logger.warning(f"{reason}: один прокси ({leaving.label}), меняю IP")
-            start_change = not leaving.changing
-            if start_change:
-                leaving.changing = True
-                leaving.ready.clear()
-            banned = leaving if start_change else None
+                logger.warning(f"{reason}: один прокси ({channel.label}), меняю IP")
 
-        if banned is not None:
-            self._change_async(banned)
-        elif leaving.change_url:
-            logger.info(f"{leaving.label}: смена IP уже идёт")
+            starting = not channel.changing
+            if starting:
+                channel.changing = True
+                channel.ready.clear()
+            self._resettle(channel, spare)
+            waiting = channel if not spare and len(self._channels) > 1 else None
 
-        if wait and wait_for is not None:
-            logger.info(f"Жду, пока {wait_for.label} поднимет новый IP")
-            if not wait_for.ready.wait(timeout=self.change_wait + 1.0):
-                logger.warning(f"{wait_for.label} так и не готов, пробую как есть")
+        if starting:
+            self._change_async(channel)
+        else:
+            logger.info(f"{channel.label}: смена IP уже идёт")
 
-    def _pick_incoming(self, leaving: ProxySlot) -> ProxySlot:
-        """Сосед, только если он живой и уже остыл.
+        if wait and waiting is not None and not waiting.ready.wait(self.change_wait + 1.0):
+            logger.warning(f"{waiting.label} так и не поднялся, пробую как есть")
 
-        Иначе остаёмся на текущем канале и ждём его новый IP: прыжок на
-        только что использованный прокси почти сразу даёт второй 429.
+    # ── Внутреннее: вызывается под ``self._lock`` ───────────────────────
+
+    def _channel(self, proxy_string: str) -> ProxyChannel | None:
+        for channel in self._channels:
+            if channel.proxy_string == proxy_string:
+                return channel
+        return None
+
+    def _least_busy(self) -> ProxyChannel | None:
+        """Самый свободный живой канал; если живых нет — самый свободный вообще."""
+        if not self._channels:
+            return None
+        live = [channel for channel in self._channels if not channel.changing]
+        return min(live or self._channels, key=lambda channel: channel.leases)
+
+    def _lease(self, key: str, channel: ProxyChannel) -> None:
+        previous = self._leases.get(key)
+        if previous is not None:
+            previous.leases -= 1
+        self._leases[key] = channel
+        channel.leases += 1
+
+    def _resettle(self, channel: ProxyChannel, spare: list[ProxyChannel]) -> None:
+        """Пересадить наборы с забаненного канала на свободные."""
+        moving = [key for key, held in self._leases.items() if held is channel]
+        for key in moving:
+            del self._leases[key]
+        channel.leases = 0
+        for key in moving:
+            if spare:
+                self._lease(key, min(spare, key=lambda other: other.leases))
+
+    def _rebalance(self) -> None:
+        """Разложить наборы по живым каналам поровну.
+
+        Нужно, когда канал вернулся с новым IP: без этого все наборы так и
+        остались бы на соседе, и второй прокси снова простаивал бы.
+        Раскладка детерминированная, поэтому набор возвращается на свой
+        прежний канал и переиспользует уже открытое соединение.
         """
-        others = [slot for slot in self._slots if slot is not leaving]
-        now = time.time()
-        rested = [
-            slot
-            for slot in others
-            if slot.ready.is_set()
-            and not slot.changing
-            and now >= slot.cooling_until
-            and now >= slot.last_used + self.cooldown
-        ]
-        return rested[0] if rested else leaving
+        live = [channel for channel in self._channels if not channel.changing]
+        if len(live) < 2:
+            return
+        settled = sorted(key for key, held in self._leases.items() if held in live)
+        for channel in live:
+            channel.leases = 0
+        for position, key in enumerate(settled):
+            self._leases[key] = live[position % len(live)]
+            live[position % len(live)].leases += 1
 
-    def _change_async(self, slot: ProxySlot) -> None:
-        if not slot.change_url:
-            logger.warning(f"Нет ссылки смены IP для {slot.label}")
-            slot.changing = False
-            slot.ready.set()
+    def _change_async(self, channel: ProxyChannel) -> None:
+        """Сменить IP в отдельном потоке: остальные каналы продолжают работать."""
+        if not channel.change_url:
+            logger.warning(f"Нет ссылки смены IP для {channel.label}")
+            with self._lock:
+                channel.changing = False
+            channel.ready.set()
             return
 
         def worker() -> None:
             try:
-                change_ip(slot.change_url, slot.proxy_string, wait_max=self.change_wait)
+                change_ip(channel.change_url, channel.proxy_string, wait_max=self.change_wait)
             except RuntimeError as err:
-                logger.warning(f"Не удалось сменить IP {slot.label}: {err}")
+                logger.warning(f"Не удалось сменить IP {channel.label}: {err}")
             finally:
                 with self._lock:
-                    slot.changing = False
-                    slot.cooling_until = time.time() + self.cooldown
-                slot.ready.set()
-                logger.info(f"{slot.label} снова в работе")
+                    channel.changing = False
+                    self._rebalance()
+                channel.ready.set()
+                logger.info(f"{channel.label} снова в работе, наборы разложены заново")
 
-        threading.Thread(target=worker, name=f"ip-change-{slot.label}", daemon=True).start()
+        threading.Thread(target=worker, name=f"ip-change-{channel.label}", daemon=True).start()
 
 
 PROXY_POOL = ProxyPool()
 
 
 def current_proxy_string(fallback: str = "") -> str:
-    """Рабочий сейчас прокси или запасной из настроек."""
+    """Живой прокси из пула или запасной из настроек."""
     return PROXY_POOL.current_string() or fallback

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -64,15 +65,43 @@ def test_clients_are_rebuilt_after_ip_change(ring: CookieRing, write_slot) -> No
     assert ring.next()[1] is not before
 
 
-def test_use_current_proxy_rebuilds_on_switch(ring: CookieRing, write_slot) -> None:
+def test_cookies_ride_their_own_proxy(ring: CookieRing, write_slot) -> None:
+    """Наборы разложены по каналам — оба IP работают, а не ждут своей очереди."""
     from avito_monitor.net.proxies import PROXY_POOL
 
+    PROXY_POOL.configure(
+        (("u:p@mproxy.site:20085", "http://change-a"), ("u:p@mproxy.site:10341", "http://change-b"))
+    )
+    for cookie_id in ("201", "202"):
+        write_slot(_slot(cookie_id))
+    ring.refresh()
+
+    ports = {str(ring.next()[1].proxies) for _ in range(2)}
+
+    assert len(ports) == 2
+
+
+def test_client_is_rebuilt_when_its_channel_is_banned(
+    ring: CookieRing, write_slot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Соединение вело к забаненному прокси — держать его бессмысленно."""
+    from avito_monitor.net.proxies import PROXY_POOL
+
+    changing = threading.Event()
+    monkeypatch.setattr(
+        "avito_monitor.net.proxies.change_ip", lambda *a, **k: changing.wait(timeout=2.0)
+    )
+    PROXY_POOL.configure(
+        (("u:p@mproxy.site:20085", "http://change-a"), ("u:p@mproxy.site:10341", "http://change-b"))
+    )
     write_slot(_slot("201"))
     ring.refresh()
-    before = ring.next()[1]
-    PROXY_POOL.configure((("u:p@mproxy.site:10341", "http://change"),))
-    ring.use_current_proxy()
-    after = ring.next()[1]
+    slot, before = ring.next()
+
+    PROXY_POOL.ban(ring.proxy_of(slot), "429")
+    after = ring.client_for(slot)
+    changing.set()
+
     assert after is not before
     assert "10341" in str(after.proxies)
 
