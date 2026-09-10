@@ -22,12 +22,13 @@ def _label(proxy_string: str) -> str:
 
 
 class ProxySlot:
-    __slots__ = ("proxy_string", "change_url", "changing", "ready")
+    __slots__ = ("proxy_string", "change_url", "changing", "cooling_until", "ready")
 
     def __init__(self, proxy_string: str, change_url: str) -> None:
         self.proxy_string = proxy_string
         self.change_url = change_url
         self.changing = False
+        self.cooling_until = 0.0
         self.ready = threading.Event()
         self.ready.set()
 
@@ -110,17 +111,20 @@ class ProxyPool:
             logger.info(f"{leaving.label}: смена IP уже идёт")
 
         if wait_for is not None:
-            timeout = self.change_wait + self.cooldown + 1.0
             logger.info(f"Жду, пока {wait_for.label} поднимет новый IP")
-            if not wait_for.ready.wait(timeout=timeout):
+            if not wait_for.ready.wait(timeout=self.change_wait + 1.0):
                 logger.warning(f"{wait_for.label} так и не готов, пробую как есть")
 
     def _pick_incoming(self, leaving: ProxySlot) -> ProxySlot:
-        """Соседний готовый канал; если все остывают — тот, что следующий по кругу."""
+        """Готовый сосед; остывающий берём, только если живого нет."""
         others = [slot for slot in self._slots if slot is not leaving]
-        ready = [slot for slot in others if slot.ready.is_set() and not slot.changing]
-        if ready:
-            return ready[0]
+        live = [slot for slot in others if slot.ready.is_set() and not slot.changing]
+        now = time.time()
+        rested = [slot for slot in live if now >= slot.cooling_until]
+        if rested:
+            return rested[0]
+        if live:
+            return live[0]
         idx = self._slots.index(leaving)
         return self._slots[(idx + 1) % len(self._slots)]
 
@@ -134,13 +138,12 @@ class ProxyPool:
         def worker() -> None:
             try:
                 change_ip(slot.change_url, slot.proxy_string, wait_max=self.change_wait)
-                if self.cooldown > 0:
-                    time.sleep(self.cooldown)
             except RuntimeError as err:
                 logger.warning(f"Не удалось сменить IP {slot.label}: {err}")
             finally:
                 with self._lock:
                     slot.changing = False
+                    slot.cooling_until = time.time() + self.cooldown
                 slot.ready.set()
                 logger.info(f"{slot.label} снова в работе")
 

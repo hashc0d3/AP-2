@@ -128,8 +128,10 @@ def test_company_seller_from_link(link: str) -> None:
     assert items.is_private_seller(item) is False
 
 
-def test_shop_id_marks_company() -> None:
-    assert items.is_company_seller(_with_profile("/user/abc/profile", shopId=99)) is True
+def test_shop_id_does_not_override_private_profile() -> None:
+    """Корзина и доставка проставляют shopId даже частникам."""
+    assert items.is_company_seller(_with_profile("/user/abc/profile", shopId=99)) is False
+    assert items.is_private_seller(_with_profile("/user/abc/profile", shopId=99)) is True
 
 
 def test_seller_name_prefers_readable_text() -> None:

@@ -206,7 +206,7 @@ def build_api_url(region_slug: str, category_id: str, *, query: str = "") -> str
         (
             ("localPriority", "0"),
             ("locationId", location_id),
-            ("owner[0]", "private"),
+            ("owner[]", "private"),
             ("presentationType", "serp"),
             ("privateOnly", "1"),
             ("sort", "date"),

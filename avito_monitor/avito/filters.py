@@ -104,10 +104,10 @@ def select_new_ads(
 ) -> tuple[list[dict], FilterStats]:
     """Выбрать объявления для ленты.
 
-    ``seen`` пополняется на месте **всеми** объявлениями выдачи, даже
-    отфильтрованными: иначе платно продвинутое объявление всплывёт позже как
-    новое. На первом цикле показываем всё подходящее, дальше — только то,
-    чего в выдаче ещё не было.
+    ``seen`` пополняется объявлениями, которые мы **показали**, и платным
+    продвижением: его Avito поднимает повторно, и без памяти оно снова
+    выглядело бы новым. Остальные отказы (компания, возраст, название) в
+    память не пишем — иначе ложный отсев навсегда прячет карточку.
 
     Возвращает объявления от свежих к старым и статистику отбора.
     """
@@ -119,9 +119,9 @@ def select_new_ads(
         if ad_id is None:
             continue
         already_seen = ad_id in seen
-        seen.add(ad_id)
 
         if settings.ignore_promotion and items_mod.is_promoted(item):
+            seen.add(ad_id)
             stats.promoted += 1
             continue
         if seller_is_skipped(item, settings.seller_skip):
@@ -150,6 +150,7 @@ def select_new_ads(
         if already_seen and not first_run:
             stats.already_seen += 1
             continue
+        seen.add(ad_id)
         selected.append(item)
 
     selected.sort(key=lambda item: item.get("sortTimeStamp") or 0, reverse=True)

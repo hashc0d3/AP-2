@@ -244,9 +244,11 @@ def seller_profile_links(item: dict) -> list[str]:
 
 
 def is_company_seller(item: dict) -> bool:
-    """Магазин или бренд, а не частное лицо."""
-    if item.get("shopId") or item.get("shop_id"):
-        return True
+    """Магазин или бренд, а не частное лицо.
+
+    ``shopId`` у Avito бывает и у частников с корзиной и доставкой — на карточке
+    при этом написано «Частное лицо». Смотрим только ссылку профиля.
+    """
     return any(
         marker in link.lower()
         for link in seller_profile_links(item)

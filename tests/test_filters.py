@@ -114,7 +114,23 @@ def test_later_runs_show_only_unseen(base_settings: Settings) -> None:
     assert stats.already_seen == 2
 
 
-def test_all_ads_are_remembered_even_when_filtered(base_settings: Settings) -> None:
+def test_rejected_non_promo_ads_can_surface_later(base_settings: Settings) -> None:
+    """Ложный «магазин» не должен навсегда закрыть карточку."""
+    settings = replace(base_settings, private_only=True)
+    company = _with_seller(COMPANY)
+    seen: set[int] = set()
+    selected, stats = filters.select_new_ads([company], settings, seen, first_run=False)
+    assert selected == []
+    assert stats.company == 1
+    assert seen == set()
+
+    private = _with_seller(PRIVATE, **{"id": 1})
+    selected, _ = filters.select_new_ads([private], settings, seen, first_run=False)
+    assert [ad["id"] for ad in selected] == [1]
+    assert seen == {1}
+
+
+def test_promoted_ads_are_remembered_so_they_dont_resurface(base_settings: Settings) -> None:
     """Иначе продвинутое объявление всплывёт позже как новое."""
     promoted = _ad(9, iva={"DateInfoStep": [{"payload": {"vas": [{"title": "Продвинуто"}]}}]})
     seen: set[int] = set()
