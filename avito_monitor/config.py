@@ -67,7 +67,7 @@ class Settings:
 
     # ── Пагинация ───────────────────────────────────────────────────────
     pages: int = 2
-    pause_between_pages: int = 2
+    pause_between_pages: int = 0
 
     # ── Темп опроса ─────────────────────────────────────────────────────
     poll_interval: float = 4.0
@@ -97,7 +97,7 @@ class Settings:
     def __post_init__(self) -> None:
         # Значения из конфига могут быть любыми: приводим к разумным границам
         # один раз здесь, чтобы цикл опроса не пересчитывал их каждый раз.
-        object.__setattr__(self, "pages", max(1, self.pages))
+        object.__setattr__(self, "pages", max(2, self.pages))
         object.__setattr__(self, "pause_between_pages", max(0, self.pause_between_pages))
         object.__setattr__(self, "poll_interval", max(1.0, self.poll_interval))
         object.__setattr__(self, "per_cookie_interval", max(3.0, self.per_cookie_interval))

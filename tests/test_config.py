@@ -205,7 +205,8 @@ def test_interval_max_is_never_below_interval(config_files) -> None:
 @pytest.mark.parametrize(
     ("field", "given", "expected"),
     [
-        ("pages", 0, 1),
+        ("pages", 0, 2),
+        ("pages", 1, 2),
         ("poll_interval", 0.1, 1.0),
         ("per_cookie_interval", 1, 3.0),
         ("request_timeout", 0, 3.0),

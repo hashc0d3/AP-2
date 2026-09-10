@@ -26,10 +26,22 @@ def test_does_not_open_next_page_past_max() -> None:
     )
 
 
-def test_does_not_open_next_page_when_listing_ended() -> None:
+def test_opens_next_page_even_when_first_is_short() -> None:
+    """Частные объявления часто на p=2, даже если p=1 уже неполная по магазинам."""
     assert (
         should_open_next_page(
             page_items=[{}] * (FULL_PAGE_ITEMS - 1),
+            page=1,
+            max_pages=2,
+        )
+        is True
+    )
+
+
+def test_does_not_open_next_page_when_listing_ended() -> None:
+    assert (
+        should_open_next_page(
+            page_items=[],
             page=1,
             max_pages=2,
         )

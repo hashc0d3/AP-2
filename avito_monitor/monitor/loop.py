@@ -33,7 +33,7 @@ from avito_monitor.paths import ensure_runtime_dirs
 from avito_monitor.search_session import SESSION
 
 FULL_PAGE_ITEMS = 10
-"""Меньше объявлений на странице — значит, выдача закончилась."""
+"""Ориентир размера страницы в тестах; пустая страница — конец выдачи."""
 
 
 def should_open_next_page(
@@ -42,10 +42,14 @@ def should_open_next_page(
     page: int,
     max_pages: int,
 ) -> bool:
-    """Следующая страница — отдельный запрос ``p=N``, если эта ещё полная."""
+    """Следующая страница — отдельный запрос ``p=N``.
+
+    Первая страница часто забита магазинами, частные карточки уезжают на
+    ``p=2``. Пустую страницу не листаем: выдачи больше нет.
+    """
     if page >= max_pages:
         return False
-    return len(page_items) >= FULL_PAGE_ITEMS
+    return bool(page_items)
 
 
 @dataclass(slots=True)
@@ -87,8 +91,9 @@ def _recover_empty_pool(settings: Settings, ring: CookieRing, reason: str) -> tu
 def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
     """Забрать выдачу Avito, восстанавливаясь после отказов.
 
-    Страницы ``p=1`` и ``p=2`` — отдельные запросы. Дальше не идём, если
-    текущая страница короче полной выдачи.
+    Страницы ``p=1`` и ``p=2`` — два отдельных запроса подряд, не одна
+    ссылка. Сначала первая, потом вторая: иначе частные объявления,
+    вытесненные магазинами с первой страницы, мы не видим.
     """
     result = CycleResult()
     slot, client = ring.next()
@@ -116,6 +121,7 @@ def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
 
     for page in range(1, settings.pages + 1):
         url = catalog.with_page(settings.api_url, page)
+        logger.info(f"Запрашиваю отдельно p={page}")
         try:
             status, payload = _fetch_page(client, url, settings.request_timeout)
         except RequestException:
@@ -177,14 +183,14 @@ def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
             ad_id = items_mod.item_id(item)
             if ad_id is not None:
                 collected.setdefault(ad_id, item)
-        logger.info(f"p={page}: {len(page_items)} объявлений")
+        logger.info(f"p={page}: {len(page_items)} объявлений, всего {len(collected)}")
         if not should_open_next_page(
             page_items=page_items,
             page=page,
             max_pages=settings.pages,
         ):
             break
-        logger.info(f"Беру p={page + 1} отдельным запросом")
+        logger.info(f"Следующий запрос отдельно: p={page + 1}")
         if settings.pause_between_pages:
             time.sleep(settings.pause_between_pages)
 
