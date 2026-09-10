@@ -16,8 +16,6 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from urllib.parse import parse_qsl, urlsplit
-
 from curl_cffi.requests.exceptions import RequestException
 from loguru import logger
 
@@ -200,6 +198,7 @@ def run_cycle(
     seen: SeenStore,
     *,
     first_run: bool,
+    started_at: float = 0.0,
 ) -> tuple[list[dict], bool, bool]:
     """Один цикл: опрос, фильтрация, отчёт в лог.
 
@@ -212,7 +211,9 @@ def run_cycle(
         return [], True, result.throttled
 
     logger.info(f"Получено объявлений: {len(result.items)}")
-    selected, stats = filters.select_new_ads(result.items, settings, seen.ids, first_run=first_run)
+    selected, stats = filters.select_new_ads(
+        result.items, settings, seen.ids, first_run=first_run, started_at=started_at
+    )
     seen.save()
 
     summary = stats.summary()
@@ -240,13 +241,6 @@ def run_cycle(
     return selected, result.failed, result.throttled
 
 
-def _sort_from_web(web_url: str) -> str:
-    for key, value in parse_qsl(urlsplit(web_url).query, keep_blank_values=True):
-        if key == "s":
-            return value
-    return "104"
-
-
 def _runtime_settings(settings: Settings, search: dict) -> Settings:
     """Настройки для конкретного поиска из веб-интерфейса.
 
@@ -259,11 +253,7 @@ def _runtime_settings(settings: Settings, search: dict) -> Settings:
         models = None
     web_url = search.get("web_url") or ""
     raw_api = search.get("api_url") or ""
-    api_url = (
-        catalog.normalize_items_api_url(raw_api, prefer_s=_sort_from_web(web_url))
-        if raw_api
-        else ""
-    )
+    api_url = catalog.normalize_items_api_url(raw_api, prefer_s=catalog.DATE_SORT) if raw_api else ""
     if raw_api and api_url != raw_api and (
         "presentationType" in raw_api or "sort=date" in raw_api
     ):
@@ -302,7 +292,13 @@ def _monitor_search(settings: Settings, ring: CookieRing, seen: SeenStore, gener
         throttled = False
 
         try:
-            selected, failed, throttled = run_cycle(runtime, ring, seen, first_run=first_run)
+            selected, failed, throttled = run_cycle(
+                runtime,
+                ring,
+                seen,
+                first_run=first_run,
+                started_at=float(search.get("started_at") or 0.0),
+            )
             if selected:
                 publish_ads([items_mod.serialize_ad(item, tz_name=tz_name) for item in selected])
             first_run = False

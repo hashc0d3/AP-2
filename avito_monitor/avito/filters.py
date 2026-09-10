@@ -66,6 +66,8 @@ class FilterStats:
     already_seen: int = 0
     baseline: int = 0
     """Сколько объявлений запомнили на старте, не кладя в ленту."""
+    before_start: int = 0
+    """Опубликованы до нажатия «Начать поиск»."""
     promotion_badge_ignored: bool = False
 
     def summary(self) -> str:
@@ -78,6 +80,7 @@ class FilterStats:
             ("не та модель iPhone", self.iphone_model),
             ("уже показывали", self.already_seen),
             ("на старте запомнил", self.baseline),
+            ("раньше старта", self.before_start),
         )
         parts = [f"{label}: {count}" for label, count in reasons if count]
         if self.promotion_badge_ignored:
@@ -91,11 +94,14 @@ def select_new_ads(
     seen: set[int],
     *,
     first_run: bool,
+    started_at: float = 0.0,
 ) -> tuple[list[dict], FilterStats]:
     """Выбрать объявления для ленты.
 
     Первый цикл только запоминает текущую выдачу: в ленту ничего не кладём.
-    Дальше показываем только то, чего не было на старте.
+    Дальше показываем только то, что опубликовано после «Начать поиск» и
+    чего не было на старте. Старое объявление, всплывшее на второй странице
+    или после смены выдачи, в ленту не попадает.
 
     ``seen`` пополняется объявлениями, которые мы **показали** или запомнили
     на старте, и платным продвижением: его Avito поднимает повторно, и без
@@ -144,8 +150,19 @@ def select_new_ads(
         if already_seen:
             stats.already_seen += 1
             continue
+        if started_at and not _published_after(item, started_at):
+            stats.before_start += 1
+            continue
         seen.add(ad_id)
         selected.append(item)
 
     selected.sort(key=lambda item: item.get("sortTimeStamp") or 0, reverse=True)
     return selected, stats
+
+
+def _published_after(item: dict, started_at: float) -> bool:
+    """Опубликовано ли объявление после нажатия «Начать поиск»."""
+    published = items_mod.published_at(item)
+    if published is None:
+        return False
+    return published.timestamp() > started_at

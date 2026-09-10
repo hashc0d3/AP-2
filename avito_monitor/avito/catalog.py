@@ -195,17 +195,23 @@ def _rebuild_items_url(query: list[tuple[str, str]]) -> str:
     return f"{ITEMS_API_URL}?{urlencode(query)}"
 
 
+DATE_SORT = "104"
+"""Код сортировки Avito «по дате»: свежие сверху, без платной выдачи."""
+
+
 def normalize_items_api_url(api_url: str, *, prefer_s: str | None = None) -> str:
     """Привести адрес JSON API к той же выдаче, что веб-поиск «по дате».
 
     ``presentationType=serp`` и ``sort=date`` подмешивают платные карточки:
     на сайте при этом обычные объявления, а в JSON — все «Продвинуто».
+    Сортировку всегда ставим ``s=104``, даже если во вставленной ссылке
+    другое значение: иначе в выдачу попадают вчерашние объявления.
     """
     split = urlsplit(api_url)
     raw = parse_qsl(split.query, keep_blank_values=True)
-    sort_s = prefer_s or next((value for key, value in raw if key == "s"), None) or "104"
+    _ = prefer_s
     query = [(key, value) for key, value in raw if key not in _DROP_FROM_ITEMS_API and key != "s"]
-    query.append(("s", sort_s))
+    query.append(("s", DATE_SORT))
     keys = {key for key, _ in query}
     if not any(key.startswith("owner") and value == "private" for key, value in query):
         query.append(("owner[]", "private"))

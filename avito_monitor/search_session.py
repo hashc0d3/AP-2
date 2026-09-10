@@ -47,6 +47,7 @@ class SearchSession:
         self._mode = MODE_QUERY
         self._iphone_models: tuple[str, ...] | None = None
         self._iphone_models_in_url = False
+        self._started_at = 0.0
 
     # ── Чтение ──────────────────────────────────────────────────────────
 
@@ -68,6 +69,7 @@ class SearchSession:
                     list(self._iphone_models) if self._iphone_models is not None else None
                 ),
                 "iphone_models_in_url": self._iphone_models_in_url,
+                "started_at": self._started_at,
             }
 
     @property
@@ -109,6 +111,7 @@ class SearchSession:
                 self._seller_skip = _unique_strings(seller_skip)
             self._iphone_models = iphone_models
             self._iphone_models_in_url = iphone_models_in_url
+            self._started_at = time.time()
         self._changed.set()
         return self.snapshot()
 
@@ -118,6 +121,7 @@ class SearchSession:
             if self._running:
                 self._generation += 1
                 self._running = False
+                self._started_at = 0.0
                 logger.info("Мониторинг остановлен")
         self._changed.set()
         return self.snapshot()

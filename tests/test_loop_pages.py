@@ -42,7 +42,7 @@ def test_runtime_settings_strip_paid_serp() -> None:
     runtime = _runtime_settings(
         Settings(),
         {
-            "web_url": "https://www.avito.ru/moskva/telefony?s=104",
+            "web_url": "https://www.avito.ru/moskva/telefony?s=1",
             "api_url": (
                 "https://www.avito.ru/web/1/js/items?locationId=637640"
                 "&presentationType=serp&sort=date&s=1&owner[]=private"

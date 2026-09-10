@@ -170,13 +170,30 @@ def test_results_are_sorted_newest_first(base_settings: Settings) -> None:
     assert [ad["id"] for ad in selected] == [2, 3, 1]
 
 
-def test_old_ads_are_not_dropped_by_age(base_settings: Settings) -> None:
-    """Возраст на Avito больше не режет: новое — то, чего не было на старте."""
+def test_ads_published_before_start_are_dropped(base_settings: Settings) -> None:
+    """Вчерашнее объявление не должно всплыть, даже если его не было в первом цикле."""
+    started = time.time() - 60
     selected, stats = filters.select_new_ads(
-        [_ad(1, age=10), _ad(2, age=9000)], base_settings, set(), first_run=False
+        [_ad(1, age=10), _ad(2, age=9000)],
+        base_settings,
+        set(),
+        first_run=False,
+        started_at=started,
     )
-    assert {ad["id"] for ad in selected} == {1, 2}
-    assert stats.baseline == 0
+    assert [ad["id"] for ad in selected] == [1]
+    assert stats.before_start == 1
+
+
+def test_ads_without_timestamp_are_not_new(base_settings: Settings) -> None:
+    selected, stats = filters.select_new_ads(
+        [{"id": 1, "title": "без даты"}],
+        base_settings,
+        set(),
+        first_run=False,
+        started_at=time.time(),
+    )
+    assert selected == []
+    assert stats.before_start == 1
 
 
 def test_iphone_model_filter_applies(base_settings: Settings) -> None:
