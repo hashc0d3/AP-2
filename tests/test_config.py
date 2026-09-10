@@ -15,6 +15,8 @@ _ENV_KEYS = (
     "PROXY_CHANGE_URL",
     "PROXY_STRING_2",
     "PROXY_CHANGE_URL_2",
+    "PROXY_STRING_3",
+    "PROXY_CHANGE_URL_3",
     "COOKIES_API_KEY",
     "WEB_PORT",
 )
@@ -126,6 +128,8 @@ def test_secrets_come_from_env(config_files) -> None:
         PROXY_STRING=http://user:pass@1.2.3.4:8000
         PROXY_STRING_2=http://user:pass@5.6.7.8:9000
         PROXY_CHANGE_URL_2=https://aproxy.site/?proxy_key=second
+        PROXY_STRING_3=http://user:pass@9.9.9.9:10000
+        PROXY_CHANGE_URL_3=https://aproxy.site/?proxy_key=third
         COOKIES_API_KEY=abc123
         """
     )
@@ -133,10 +137,12 @@ def test_secrets_come_from_env(config_files) -> None:
     assert settings.proxy_string == "http://user:pass@1.2.3.4:8000"
     assert settings.proxy_string_2 == "http://user:pass@5.6.7.8:9000"
     assert settings.proxy_change_url_2 == "https://aproxy.site/?proxy_key=second"
+    assert settings.proxy_string_3 == "http://user:pass@9.9.9.9:10000"
     assert settings.cookies_api_key == "abc123"
     assert settings.proxy_endpoints() == (
         ("http://user:pass@1.2.3.4:8000", ""),
         ("http://user:pass@5.6.7.8:9000", "https://aproxy.site/?proxy_key=second"),
+        ("http://user:pass@9.9.9.9:10000", "https://aproxy.site/?proxy_key=third"),
     )
 
 

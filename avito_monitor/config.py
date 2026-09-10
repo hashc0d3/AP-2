@@ -23,6 +23,8 @@ _SECRET_ENV_KEYS = {
     "proxy_change_url": "PROXY_CHANGE_URL",
     "proxy_string_2": "PROXY_STRING_2",
     "proxy_change_url_2": "PROXY_CHANGE_URL_2",
+    "proxy_string_3": "PROXY_STRING_3",
+    "proxy_change_url_3": "PROXY_CHANGE_URL_3",
     "cookies_api_key": "COOKIES_API_KEY",
 }
 
@@ -48,6 +50,8 @@ class Settings:
     proxy_change_url: str = ""
     proxy_string_2: str = ""
     proxy_change_url_2: str = ""
+    proxy_string_3: str = ""
+    proxy_change_url_3: str = ""
     cookies_api_key: str = ""
 
     # ── Что показывать ──────────────────────────────────────────────────
@@ -82,7 +86,7 @@ class Settings:
     ip_change_wait: float = 25.0
 
     # ── Пул cookies ─────────────────────────────────────────────────────
-    cookie_pool_size: int = 5
+    cookie_pool_size: int = 16
     cookie_unblock_pause: int = 60
 
     # ── Веб-интерфейс ───────────────────────────────────────────────────
@@ -116,12 +120,14 @@ class Settings:
     def proxy_endpoints(self) -> tuple[tuple[str, str], ...]:
         """Пары (строка прокси, ссылка смены IP) для рабочего пула."""
         pairs: list[tuple[str, str]] = []
-        first = self.proxy_string.strip()
-        if first:
-            pairs.append((first, self.proxy_change_url.strip()))
-        second = self.proxy_string_2.strip()
-        if second:
-            pairs.append((second, self.proxy_change_url_2.strip()))
+        for proxy_string, change_url in (
+            (self.proxy_string, self.proxy_change_url),
+            (self.proxy_string_2, self.proxy_change_url_2),
+            (self.proxy_string_3, self.proxy_change_url_3),
+        ):
+            text = proxy_string.strip()
+            if text:
+                pairs.append((text, change_url.strip()))
         return tuple(pairs)
 
     def for_search(
