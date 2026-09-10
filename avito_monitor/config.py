@@ -30,7 +30,9 @@ _SECRET_ENV_KEYS = {
 _KEY_ALIASES = {"pause_general": "retry_pause"}
 
 # Ключи, которые раньше были в примере конфига и больше ни на что не влияют.
-_OBSOLETE_KEYS = frozenset({"url", "api_url", "pause_max", "socks5_proxy"})
+_OBSOLETE_KEYS = frozenset(
+    {"url", "api_url", "pause_max", "socks5_proxy", "max_age", "notify_max_age"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,10 +56,6 @@ class Settings:
     seller_skip: tuple[str, ...] = ()
     title_must_contain: tuple[str, ...] = ()
     title_skip: tuple[str, ...] = ()
-    max_age: int = 1200
-    """Максимальный возраст объявления в секундах; 0 — без ограничения."""
-    notify_max_age: int = 0
-    """Не показывать объявления старше N секунд на момент попадания в ленту."""
 
     # ── Фильтр моделей iPhone ───────────────────────────────────────────
     iphone_min_model: int = 0

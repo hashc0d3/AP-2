@@ -53,19 +53,6 @@ def test_no_title_filters_pass_everything() -> None:
     assert filters.title_matches(_ad(title="что угодно"), (), ()) is True
 
 
-def test_freshness_limit() -> None:
-    assert filters.is_fresh(_ad(age=10), 300) is True
-    assert filters.is_fresh(_ad(age=600), 300) is False
-
-
-def test_zero_limit_disables_freshness_check() -> None:
-    assert filters.is_fresh(_ad(age=100_000), 0) is True
-
-
-def test_ad_without_timestamp_is_not_fresh() -> None:
-    assert filters.is_fresh({"id": 1}, 300) is False
-
-
 def test_seller_blacklist_ignores_punctuation_and_case() -> None:
     """Продавцы разбавляют имена символами — сравниваем «скелеты» строк."""
     item = _with_seller(PRIVATE, name="П Р Е М И У М . Store")
@@ -97,19 +84,27 @@ def test_private_seller_with_delivery_shop_is_allowed() -> None:
     assert filters.seller_is_allowed(item, private_only=True) is True
 
 
+def test_delivery_shop_without_user_profile_is_allowed() -> None:
+    """Иначе новые частные объявления пропадали как «компания»."""
+    item = _ad(iva={"ShopInfoStep": [{"payload": {"link": "/shop/delivery"}}]}, shopId=99)
+    assert filters.seller_is_allowed(item, private_only=True) is True
+
+
 # ── Пайплайн отбора ────────────────────────────────────────────────────────
 
 
 @pytest.fixture
 def base_settings() -> Settings:
-    return Settings(max_age=300, private_only=False, ignore_promotion=True)
+    return Settings(private_only=False, ignore_promotion=True)
 
 
-def test_first_run_shows_everything_suitable(base_settings: Settings) -> None:
+def test_first_run_remembers_without_showing(base_settings: Settings) -> None:
     ads = [_ad(1), _ad(2), _ad(3)]
-    selected, stats = filters.select_new_ads(ads, base_settings, set(), first_run=True)
-    assert len(selected) == 3
-    assert stats.total == 3
+    seen: set[int] = set()
+    selected, stats = filters.select_new_ads(ads, base_settings, seen, first_run=True)
+    assert selected == []
+    assert stats.baseline == 3
+    assert seen == {1, 2, 3}
 
 
 def test_later_runs_show_only_unseen(base_settings: Settings) -> None:
@@ -145,16 +140,17 @@ def test_promoted_ads_are_remembered_so_they_dont_resurface(base_settings: Setti
     selected, stats = filters.select_new_ads(
         [promoted, ordinary], base_settings, seen, first_run=True
     )
-    assert [ad["id"] for ad in selected] == [8]
+    assert selected == []
     assert stats.promoted == 1
-    assert 9 in seen
+    assert stats.baseline == 1
+    assert seen == {8, 9}
 
 
 def test_all_promoted_page_is_not_hidden(base_settings: Settings) -> None:
     """Бейдж на каждой карточке JSON — ложный, на сайте те же объявления обычные."""
     badge = {"DateInfoStep": [{"payload": {"vas": [{"title": "Продвинуто"}]}}]}
     selected, stats = filters.select_new_ads(
-        [_ad(1, iva=badge), _ad(2, iva=badge)], base_settings, set(), first_run=True
+        [_ad(1, iva=badge), _ad(2, iva=badge)], base_settings, set(), first_run=False
     )
     assert {ad["id"] for ad in selected} == {1, 2}
     assert stats.promoted == 0
@@ -164,43 +160,29 @@ def test_all_promoted_page_is_not_hidden(base_settings: Settings) -> None:
 def test_promoted_can_be_allowed(base_settings: Settings) -> None:
     promoted = _ad(9, iva={"DateInfoStep": [{"payload": {"vas": [{"title": "Продвинуто"}]}}]})
     settings = replace(base_settings, ignore_promotion=False)
-    selected, _ = filters.select_new_ads([promoted], settings, set(), first_run=True)
+    selected, _ = filters.select_new_ads([promoted], settings, set(), first_run=False)
     assert len(selected) == 1
 
 
 def test_results_are_sorted_newest_first(base_settings: Settings) -> None:
     ads = [_ad(1, age=200), _ad(2, age=10), _ad(3, age=100)]
-    selected, _ = filters.select_new_ads(ads, base_settings, set(), first_run=True)
+    selected, _ = filters.select_new_ads(ads, base_settings, set(), first_run=False)
     assert [ad["id"] for ad in selected] == [2, 3, 1]
 
 
-def test_stale_ads_are_counted(base_settings: Settings) -> None:
+def test_old_ads_are_not_dropped_by_age(base_settings: Settings) -> None:
+    """Возраст на Avito больше не режет: новое — то, чего не было на старте."""
     selected, stats = filters.select_new_ads(
-        [_ad(1, age=10), _ad(2, age=9000)], base_settings, set(), first_run=True
+        [_ad(1, age=10), _ad(2, age=9000)], base_settings, set(), first_run=False
     )
-    assert [ad["id"] for ad in selected] == [1]
-    assert stats.stale == 1
-
-
-def test_notify_max_age_drops_late_arrivals(base_settings: Settings) -> None:
-    """Объявление ещё «свежее», но в ленту попало бы слишком поздно."""
-    settings = replace(base_settings, notify_max_age=60)
-    selected, stats = filters.select_new_ads(
-        [_ad(1, age=10), _ad(2, age=200)], base_settings, set(), first_run=True
-    )
-    assert len(selected) == 2
-
-    selected, stats = filters.select_new_ads(
-        [_ad(1, age=10), _ad(2, age=200)], settings, set(), first_run=True
-    )
-    assert [ad["id"] for ad in selected] == [1]
-    assert stats.too_late == 1
+    assert {ad["id"] for ad in selected} == {1, 2}
+    assert stats.baseline == 0
 
 
 def test_iphone_model_filter_applies(base_settings: Settings) -> None:
     settings = replace(base_settings, iphone_models=("13-pro",), category_id="apple_phones")
     ads = [_ad(1, title="iPhone 13 Pro"), _ad(2, title="iPhone 14 Pro")]
-    selected, stats = filters.select_new_ads(ads, settings, set(), first_run=True)
+    selected, stats = filters.select_new_ads(ads, settings, set(), first_run=False)
     assert [ad["id"] for ad in selected] == [1]
     assert stats.iphone_model == 1
 
@@ -209,7 +191,7 @@ def test_iphone_model_filter_ignored_for_tablets(base_settings: Settings) -> Non
     """Даже если в сессии остались модели iPhone, планшеты они не режут."""
     settings = replace(base_settings, iphone_models=("13-pro",), category_id="tablets")
     ads = [_ad(1, title="iPad Air 13 m3 256gb Purple")]
-    selected, stats = filters.select_new_ads(ads, settings, set(), first_run=True)
+    selected, stats = filters.select_new_ads(ads, settings, set(), first_run=False)
     assert [ad["id"] for ad in selected] == [1]
     assert stats.iphone_model == 0
 
@@ -218,13 +200,13 @@ def test_model_filter_skipped_when_already_in_url(base_settings: Settings) -> No
     """Avito уже отфильтровал выдачу — повторно проверять название незачем."""
     settings = replace(base_settings, iphone_models=("13-pro",), iphone_models_in_url=True)
     ads = [_ad(1, title="Совсем другое название")]
-    selected, _ = filters.select_new_ads(ads, settings, set(), first_run=True)
+    selected, _ = filters.select_new_ads(ads, settings, set(), first_run=False)
     assert len(selected) == 1
 
 
 def test_ads_without_id_are_skipped(base_settings: Settings) -> None:
     selected, stats = filters.select_new_ads(
-        [{"title": "без id"}, _ad(1)], base_settings, set(), first_run=True
+        [{"title": "без id"}, _ad(1)], base_settings, set(), first_run=False
     )
     assert [ad["id"] for ad in selected] == [1]
     assert stats.total == 2

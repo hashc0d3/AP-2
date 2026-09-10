@@ -7,9 +7,9 @@
 Events (открытое соединение ``/events``), запасной — опрос ``/api/ads``.
 Дубликаты отсекаются по ID, поэтому оба пути могут работать одновременно.
 
-Ленту подчищаем каждую минуту: оставляем объявления, полученные за
-последние 20 минут. В поиск по-прежнему попадают только свежие карточки
-Avito (``max_age`` в фильтрах, тоже 20 минут).
+В ленту попадают только объявления, которых не было в выдаче на момент
+запуска поиска. Карточки живут, пока их не вытеснит лимит ``MAX_ADS``
+или новый поиск не очистит ленту.
 """
 
 from __future__ import annotations
@@ -27,27 +27,10 @@ from loguru import logger
 from avito_monitor.paths import ADS_PATH
 
 MAX_ADS = 200
-"""Столько объявлений храним; более старые вытесняются, даже если ещё свежие."""
-
-SWEEP_INTERVAL_SEC = 60
-"""Как часто подчищаем ленту."""
-
-KEEP_RECENT_SEC = 20 * 60
-"""Оставляем объявления, полученные за последние 20 минут."""
+"""Столько объявлений храним; более старые вытесняются новыми."""
 
 RESET_EVENT = {"reset": True}
 """Служебное сообщение подписчикам: ленту очистили."""
-
-
-def _received_at(ad: dict) -> float:
-    """Когда объявление попало в нашу ленту. Без метки считаем нулём."""
-    raw = ad.get("received_at")
-    if raw is None:
-        raw = ad.get("ts")
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return 0.0
 
 
 class AdFeed:
@@ -81,20 +64,15 @@ class AdFeed:
         ADS_PATH.write_text(json.dumps(self._ads, ensure_ascii=False), encoding="utf-8")
 
     def snapshot(self) -> list[dict]:
-        """Текущая лента, свежие объявления первыми.
-
-        Карточки старше ``KEEP_RECENT_SEC`` с момента попадания к нам
-        уже не отдаём — иначе опрос ``/api/ads`` вернул бы их обратно.
-        """
-        cutoff = time.time() - KEEP_RECENT_SEC
+        """Текущая лента, свежие объявления первыми."""
         with self._lock:
-            return [ad for ad in self._ads if _received_at(ad) >= cutoff]
+            return list(self._ads)
 
     def publish(self, ads: list[dict]) -> list[dict]:
         """Добавить объявления в ленту и разослать подписчикам.
 
         Возвращает те, которых в ленте ещё не было. Помечаем ``received_at``,
-        чтобы плановая чистка оставляла только свежеполученные.
+        чтобы в карточке было видно, когда объявление попало к нам.
         """
         if not ads:
             return []
@@ -120,29 +98,6 @@ class AdFeed:
             listener.put(incoming)
         logger.info(f"В веб-ленту добавлено {len(incoming)} объявлений")
         return incoming
-
-    def sweep(self, keep_seconds: int = KEEP_RECENT_SEC) -> int:
-        """Убрать всё, кроме объявлений, полученных за ``keep_seconds``.
-
-        Браузерам шлём ``reset`` и оставшийся хвост, чтобы лента не вспыхнула
-        пустой на несколько секунд до следующего опроса.
-        """
-        cutoff = time.time() - max(0, keep_seconds)
-        with self._lock:
-            kept = [ad for ad in self._ads if _received_at(ad) >= cutoff]
-            removed = len(self._ads) - len(kept)
-            if removed == 0:
-                return 0
-            self._ads = kept
-            self._save_to_disk()
-            listeners = list(self._listeners)
-
-        for listener in listeners:
-            listener.put(dict(RESET_EVENT))
-            if kept:
-                listener.put(list(kept))
-        logger.info(f"Плановая чистка ленты: убрано {removed}, осталось {len(kept)}")
-        return removed
 
     def clear(self) -> int:
         """Очистить ленту. Возвращает число удалённых объявлений."""
@@ -202,16 +157,3 @@ def snapshot_ads() -> list[dict]:
     return FEED.snapshot()
 
 
-def start_sweeper(store: AdFeed | None = None) -> None:
-    """Фоновая чистка ленты раз в минуту."""
-    target = store if store is not None else FEED
-
-    def loop() -> None:
-        while True:
-            time.sleep(SWEEP_INTERVAL_SEC)
-            try:
-                target.sweep(KEEP_RECENT_SEC)
-            except Exception:
-                logger.exception("Плановая чистка ленты не удалась")
-
-    threading.Thread(target=loop, name="feed-sweeper", daemon=True).start()

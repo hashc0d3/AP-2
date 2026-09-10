@@ -28,7 +28,7 @@ from avito_monitor import auth
 from avito_monitor.config import Settings
 from avito_monitor.paths import STATIC_DIR
 from avito_monitor.web import images
-from avito_monitor.web.feed import FEED, start_sweeper
+from avito_monitor.web.feed import FEED
 from avito_monitor.web.routes import AUTH_REQUIRED_ERROR, Request, Response, dispatch
 
 # Обрыв соединения браузером — обычное дело: пользователь обновил страницу
@@ -399,7 +399,6 @@ def start_server(settings: Settings) -> QuietServer:
     :raises RuntimeError: порт занят другой копией приложения.
     """
     FEED.load_from_disk()
-    start_sweeper(FEED)
     host = os.environ.get("WEB_HOST", "127.0.0.1")
     port = settings.web_port
 

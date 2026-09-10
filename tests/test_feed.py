@@ -63,8 +63,8 @@ def test_empty_publish_does_nothing(fresh_feed: AdFeed) -> None:
     assert fresh_feed.publish([]) == []
 
 
-def test_feed_keeps_old_published_ads_until_sweep(fresh_feed: AdFeed) -> None:
-    """Возраст на Avito больше не выкидывает карточку из ленты сразу."""
+def test_feed_keeps_ads_regardless_of_age(fresh_feed: AdFeed) -> None:
+    """Возраст на Avito и время в ленте больше не выкидывают карточку."""
     now = time.time()
     fresh_feed.publish(
         [
@@ -72,41 +72,8 @@ def test_feed_keeps_old_published_ads_until_sweep(fresh_feed: AdFeed) -> None:
             {"id": 2, "title": "старое", "ts": now - 400},
         ]
     )
+    fresh_feed._ads[1]["received_at"] = now - 21 * 60
     assert [ad["id"] for ad in fresh_feed.snapshot()] == [1, 2]
-
-
-def test_sweep_keeps_ads_received_in_last_20_minutes(fresh_feed: AdFeed) -> None:
-    now = time.time()
-    fresh_feed.publish([{"id": 1, "title": "свежее"}, {"id": 2, "title": "старое"}])
-    fresh_feed._ads[1]["received_at"] = now - 21 * 60
-    assert fresh_feed.sweep(keep_seconds=feed.KEEP_RECENT_SEC) == 1
-    assert [ad["id"] for ad in fresh_feed.snapshot()] == [1]
-
-
-def test_snapshot_hides_ads_older_than_20_minutes(fresh_feed: AdFeed) -> None:
-    now = time.time()
-    fresh_feed.publish([{"id": 1, "title": "свежее"}, {"id": 2, "title": "старое"}])
-    fresh_feed._ads[1]["received_at"] = now - 21 * 60
-    assert [ad["id"] for ad in fresh_feed.snapshot()] == [1]
-
-
-def test_sweep_does_nothing_when_all_recent(fresh_feed: AdFeed) -> None:
-    fresh_feed.publish([{"id": 1}])
-    assert fresh_feed.sweep(keep_seconds=feed.KEEP_RECENT_SEC) == 0
-    assert [ad["id"] for ad in fresh_feed.snapshot()] == [1]
-
-
-def test_sweep_notifies_reset_and_remaining(fresh_feed: AdFeed) -> None:
-    with fresh_feed.subscription() as listener:
-        fresh_feed.publish([{"id": 1}])
-        listener.get(timeout=1)
-        fresh_feed._ads[0]["received_at"] = time.time() - 21 * 60
-        fresh_feed.publish([{"id": 2}])
-        listener.get(timeout=1)
-        fresh_feed.sweep(keep_seconds=feed.KEEP_RECENT_SEC)
-        assert listener.get(timeout=1) == feed.RESET_EVENT
-        remaining = listener.get(timeout=1)
-        assert [ad["id"] for ad in remaining] == [2]
 
 
 # ── Диск ───────────────────────────────────────────────────────────────────

@@ -22,14 +22,6 @@ def title_matches(item: dict, must_contain: tuple[str, ...], skip: tuple[str, ..
     return not any(word.lower() in title for word in skip if word)
 
 
-def is_fresh(item: dict, max_age: int) -> bool:
-    """Не старше ``max_age`` секунд. ``0`` — ограничения нет."""
-    if not max_age:
-        return True
-    age = items_mod.age_seconds(item)
-    return age is not None and age <= max_age
-
-
 def _normalized(value: str) -> str:
     """Только буквы и цифры в нижнем регистре.
 
@@ -52,17 +44,13 @@ def seller_is_skipped(item: dict, skip: tuple[str, ...]) -> bool:
 def seller_is_allowed(item: dict, *, private_only: bool = True) -> bool:
     """Подходит ли продавец под режим «только частные объявления».
 
-    Если ссылок на профиль нет вовсе, объявление пропускаем: Avito отдаёт
-    профиль не всегда, и молча терять частников хуже, чем изредка показать
-    магазин.
+    Магазин режем только по профилю в карточке. Корзина ``/shop/`` и
+    отсутствие ``/user/`` частника не прячут: Avito так размечает доставку,
+    и из‑за этого лента пустела, хотя на сайте те же объявления — частные.
     """
     if not private_only:
         return True
-    if items_mod.is_company_seller(item):
-        return False
-    if not items_mod.seller_profile_links(item):
-        return True
-    return items_mod.is_private_seller(item)
+    return not items_mod.is_company_seller(item)
 
 
 @dataclass(slots=True)
@@ -73,11 +61,11 @@ class FilterStats:
     promoted: int = 0
     seller_skipped: int = 0
     company: int = 0
-    stale: int = 0
     title: int = 0
     iphone_model: int = 0
-    too_late: int = 0
     already_seen: int = 0
+    baseline: int = 0
+    """Сколько объявлений запомнили на старте, не кладя в ленту."""
     promotion_badge_ignored: bool = False
 
     def summary(self) -> str:
@@ -86,11 +74,10 @@ class FilterStats:
             ("продвинутых скрыто", self.promoted),
             ("продавец скрыт", self.seller_skipped),
             ("компания", self.company),
-            ("старее лимита", self.stale),
             ("не подходит название", self.title),
             ("не та модель iPhone", self.iphone_model),
-            ("поздно в выдаче", self.too_late),
             ("уже показывали", self.already_seen),
+            ("на старте запомнил", self.baseline),
         )
         parts = [f"{label}: {count}" for label, count in reasons if count]
         if self.promotion_badge_ignored:
@@ -107,10 +94,13 @@ def select_new_ads(
 ) -> tuple[list[dict], FilterStats]:
     """Выбрать объявления для ленты.
 
-    ``seen`` пополняется объявлениями, которые мы **показали**, и платным
-    продвижением: его Avito поднимает повторно, и без памяти оно снова
-    выглядело бы новым. Остальные отказы (компания, возраст, название) в
-    память не пишем — иначе ложный отсев навсегда прячет карточку.
+    Первый цикл только запоминает текущую выдачу: в ленту ничего не кладём.
+    Дальше показываем только то, чего не было на старте.
+
+    ``seen`` пополняется объявлениями, которые мы **показали** или запомнили
+    на старте, и платным продвижением: его Avito поднимает повторно, и без
+    памяти оно снова выглядело бы новым. Остальные отказы (компания,
+    название) в память не пишем — иначе ложный отсев навсегда прячет карточку.
 
     Возвращает объявления от свежих к старым и статистику отбора.
     """
@@ -136,9 +126,6 @@ def select_new_ads(
         if not seller_is_allowed(item, private_only=settings.private_only):
             stats.company += 1
             continue
-        if not is_fresh(item, settings.max_age):
-            stats.stale += 1
-            continue
         if not title_matches(item, settings.title_must_contain, settings.title_skip):
             stats.title += 1
             continue
@@ -150,10 +137,11 @@ def select_new_ads(
         ):
             stats.iphone_model += 1
             continue
-        if settings.notify_max_age and not is_fresh(item, settings.notify_max_age):
-            stats.too_late += 1
+        if first_run:
+            seen.add(ad_id)
+            stats.baseline += 1
             continue
-        if already_seen and not first_run:
+        if already_seen:
             stats.already_seen += 1
             continue
         seen.add(ad_id)

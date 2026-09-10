@@ -216,22 +216,21 @@ def run_cycle(
     seen.save()
 
     summary = stats.summary()
-    logger.info(f"Подходящих: {len(selected)}" + (f" ({summary})" if summary else ""))
-    if stats.promotion_badge_ignored and first_run:
-        logger.info(f"API URL: {settings.api_url}")
+    if first_run:
+        extra = f" ({summary})" if summary else ""
+        logger.info(f"Старт: запомнил выдачу{extra}, в ленту не кладу — дальше только новые")
+        if stats.promotion_badge_ignored:
+            logger.info(f"API URL: {settings.api_url}")
+        return [], result.failed, result.throttled
 
+    logger.info(f"Подходящих: {len(selected)}" + (f" ({summary})" if summary else ""))
     if not selected:
         logger.info("Новых объявлений нет")
         return [], result.failed, result.throttled
 
-    if first_run:
-        logger.info(f"Старт: в ленту {len(selected)} объявлений, дальше только новые")
-    else:
-        ages = [
-            age for age in (items_mod.age_seconds(item) for item in selected) if age is not None
-        ]
-        freshness = f", возраст {min(ages)}–{max(ages)} сек" if ages else ""
-        logger.info(f"Новых объявлений: {len(selected)}{freshness}")
+    ages = [age for age in (items_mod.age_seconds(item) for item in selected) if age is not None]
+    freshness = f", возраст {min(ages)}–{max(ages)} сек" if ages else ""
+    logger.info(f"Новых объявлений: {len(selected)}{freshness}")
 
     contacts = [items_mod.contact_flags(item) for item in selected]
     logger.info(

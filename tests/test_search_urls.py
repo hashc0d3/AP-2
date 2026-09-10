@@ -125,6 +125,15 @@ def test_with_page_replaces_existing_page() -> None:
     assert catalog.with_page(second, 3).count("p=") == 1
 
 
+def test_normalize_adds_private_filter_when_missing() -> None:
+    """Без owner[] JSON сыплет магазинами, и частные объявления не видны."""
+    dirty = "https://www.avito.ru/web/1/js/items?locationId=637640&s=104"
+    clean = catalog.normalize_items_api_url(dirty)
+    assert "owner%5B%5D=private" in clean
+    assert "privateOnly=1" in clean
+    assert "user=1" in clean
+
+
 def test_normalize_drops_serp_mixers() -> None:
     dirty = (
         "https://www.avito.ru/web/1/js/items?locationId=637640"

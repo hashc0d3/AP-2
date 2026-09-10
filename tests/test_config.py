@@ -66,7 +66,7 @@ def test_values_are_read_from_toml(config_files) -> None:
     config_files(
         toml_text="""
         [avito]
-        max_age = 120
+        cookie_pool_size = 7
         private_only = false
         poll_interval = 5
         poll_interval_max = 30
@@ -75,7 +75,7 @@ def test_values_are_read_from_toml(config_files) -> None:
         """
     )
     settings = load_settings()
-    assert settings.max_age == 120
+    assert settings.cookie_pool_size == 7
     assert settings.private_only is False
     assert settings.poll_interval == 5.0
     assert settings.poll_interval_max == 30.0
@@ -97,6 +97,8 @@ def test_obsolete_keys_are_ignored_silently(config_files) -> None:
         api_url = "https://www.avito.ru/web/1/js/items"
         pause_max = 60
         socks5_proxy = "socks5://1.2.3.4:1080"
+        max_age = 1200
+        notify_max_age = 60
         """
     )
     assert load_settings() == Settings()
@@ -109,9 +111,9 @@ def test_unknown_key_is_skipped(config_files) -> None:
 
 
 def test_wrong_type_is_skipped(config_files) -> None:
-    config_files(toml_text='[avito]\nmax_age = "не число"\npages = 2\n')
+    config_files(toml_text='[avito]\npoll_interval = "не число"\npages = 2\n')
     settings = load_settings()
-    assert settings.max_age == Settings().max_age
+    assert settings.poll_interval == Settings().poll_interval
     assert settings.pages == 2, "остальные ключи должны примениться"
 
 

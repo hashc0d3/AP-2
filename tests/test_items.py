@@ -149,6 +149,19 @@ def test_delivery_shop_block_does_not_override_private_profile() -> None:
     assert items.is_private_seller(item) is True
 
 
+def test_delivery_shop_without_user_link_is_not_a_company() -> None:
+    """Avito часто отдаёт только корзину /shop/ — частников из‑за этого теряли."""
+    item = _item(iva={"ShopInfoStep": [{"payload": {"link": "/shop/apple-delivery"}}]}, shopId=99)
+    assert items.is_company_seller(item) is False
+
+
+def test_private_badge_overrides_shop_profile() -> None:
+    item = _with_profile("/shop/foo")
+    item["iva"]["UserInfoStep"][0]["payload"]["profile"]["badge"] = {"title": "Частное лицо"}
+    assert items.is_company_seller(item) is False
+    assert items.is_private_seller(item) is True
+
+
 def test_seller_name_prefers_readable_text() -> None:
     assert items.seller_name(_with_profile("/user/abc/profile")) == "Иван"
 

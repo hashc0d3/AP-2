@@ -53,6 +53,7 @@ _SELLER_NAME_KEYS = ("sellerName", "userName", "shopName", "companyName")
 _SELLER_BLOB_KEYS = ("user", "seller", "shop", "profile")
 _SELLER_TEXT_KEYS = ("title", "name", "text", "value", "link", "slug")
 _COMPANY_URL_MARKERS = ("/brands/", "/shop/", "/company/")
+_PRIVATE_BADGE = "частное лицо"
 
 _PROMOTED_TITLE = "Продвинуто"
 _AVITO_BASE = "https://www.avito.ru"
@@ -236,41 +237,58 @@ def seller_name(item: dict) -> str:
 
 
 def seller_profile_links(item: dict) -> list[str]:
-    """Ссылки на профиль продавца — по ним видно, частник это или магазин."""
+    """Все ссылки, похожие на профиль или магазин — для чёрного списка."""
     links: list[str] = []
-    iva = item.get("iva")
-    if isinstance(iva, dict):
-        steps = iva.get("UserInfoStep") or []
-        for step in steps if isinstance(steps, list) else [steps]:
-            if not isinstance(step, dict):
-                continue
-            payload = step.get("payload") if isinstance(step.get("payload"), dict) else {}
-            profile = payload.get("profile") if isinstance(payload.get("profile"), dict) else {}
-            link = str(profile.get("link") or "").strip()
-            if link:
-                links.append(link)
+    links.extend(_user_profile_links(item))
     links.extend(text for text in seller_texts(item) if text.startswith("/") or "://" in text)
     return links
+
+
+def _user_profile_links(item: dict) -> list[str]:
+    """Ссылка из ``UserInfoStep`` — кто продавец на карточке, а не корзина."""
+    links: list[str] = []
+    iva = item.get("iva")
+    if not isinstance(iva, dict):
+        return links
+    steps = iva.get("UserInfoStep") or []
+    for step in steps if isinstance(steps, list) else [steps]:
+        if not isinstance(step, dict):
+            continue
+        payload = step.get("payload") if isinstance(step.get("payload"), dict) else {}
+        profile = payload.get("profile") if isinstance(payload.get("profile"), dict) else {}
+        link = str(profile.get("link") or "").strip()
+        if link:
+            links.append(link)
+    return links
+
+
+def _has_private_badge(item: dict) -> bool:
+    """На карточке написано «Частное лицо» — это не магазин."""
+    return any(_PRIVATE_BADGE in text.lower() for text in seller_texts(item))
 
 
 def is_company_seller(item: dict) -> bool:
     """Магазин или бренд, а не частное лицо.
 
-    ``shopId`` и блок корзины ``ShopInfoStep`` бывают и у частников с доставкой —
-    на карточке при этом написано «Частное лицо». Если есть профиль ``/user/``,
-    это частник: ссылка ``/shop/`` у корзины его не перебивает.
+    Смотрим только профиль в ``UserInfoStep``. ``shopId`` и ``ShopInfoStep``
+    бывают у частников с доставкой — ссылка ``/shop/`` у корзины их не делает
+    магазином. Бейдж «Частное лицо» важнее любой ссылки.
     """
-    links = [link.lower() for link in seller_profile_links(item)]
+    if _has_private_badge(item):
+        return False
+    links = [link.lower() for link in _user_profile_links(item)]
     if any("/user/" in link for link in links):
         return False
     return any(marker in link for link in links for marker in _COMPANY_URL_MARKERS)
 
 
 def is_private_seller(item: dict) -> bool:
-    """Частник: профиль лежит по ``/user/…`` и признаков магазина нет."""
+    """Частник: бейдж, профиль ``/user/…`` или нет признаков магазина."""
     if is_company_seller(item):
         return False
-    return any("/user/" in link.lower() for link in seller_profile_links(item))
+    if _has_private_badge(item):
+        return True
+    return any("/user/" in link.lower() for link in _user_profile_links(item))
 
 
 # ── Прочие поля карточки ───────────────────────────────────────────────────

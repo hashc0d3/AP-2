@@ -16,9 +16,6 @@ import type { Ad } from "./types";
 /** Запасной опрос: реже — можно пропустить объявление, чаще — лишняя нагрузка. */
 const POLL_INTERVAL_MS = 4000;
 
-/** Карточка живёт в ленте 20 минут с момента, как попала к нам. */
-const FEED_KEEP_SEC = 20 * 60;
-
 /** Как часто пересчитывать «сколько назад» в карточках. */
 const CLOCK_INTERVAL_MS = 1000;
 
@@ -121,17 +118,6 @@ export function createAdFeed(opts: {
     renderEmpty();
   };
 
-  const purgeExpired = (): void => {
-    const cutoff = Date.now() / 1000 - FEED_KEEP_SEC;
-    opts.feed.querySelectorAll<HTMLElement>(".card").forEach((card) => {
-      const received = Number(card.dataset.receivedAt);
-      if (!received || received >= cutoff) return;
-      if (card.dataset.id) shown.delete(card.dataset.id);
-      card.remove();
-    });
-    syncEmpty();
-  };
-
   const purgeBlacklisted = (): void => {
     opts.feed.querySelectorAll<HTMLElement>(".card").forEach((card) => {
       const seller = card.dataset.seller || "";
@@ -155,7 +141,6 @@ export function createAdFeed(opts: {
     }, POLL_INTERVAL_MS);
     window.setInterval(() => {
       opts.cards.refreshTimes();
-      purgeExpired();
     }, CLOCK_INTERVAL_MS);
   };
 

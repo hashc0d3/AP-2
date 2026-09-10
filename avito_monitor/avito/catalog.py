@@ -207,11 +207,13 @@ def normalize_items_api_url(api_url: str, *, prefer_s: str | None = None) -> str
     query = [(key, value) for key, value in raw if key not in _DROP_FROM_ITEMS_API and key != "s"]
     query.append(("s", sort_s))
     keys = {key for key, _ in query}
-    if any(key.startswith("owner") and value == "private" for key, value in query):
-        if "privateOnly" not in keys:
-            query.append(("privateOnly", "1"))
-        if "user" not in keys:
-            query.append(("user", "1"))
+    if not any(key.startswith("owner") and value == "private" for key, value in query):
+        query.append(("owner[]", "private"))
+        keys.add("owner[]")
+    if "privateOnly" not in keys:
+        query.append(("privateOnly", "1"))
+    if "user" not in keys:
+        query.append(("user", "1"))
     path = split.path if split.path and _API_PATH_MARKER in split.path else _API_PATH_MARKER
     return urlunsplit(
         (split.scheme or "https", split.netloc or "www.avito.ru", path, urlencode(query), "")
