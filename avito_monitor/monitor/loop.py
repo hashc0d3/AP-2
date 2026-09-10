@@ -55,6 +55,12 @@ def _rotate_ip(ring: CookieRing, reason: str) -> None:
     ring.use_current_proxy()
 
 
+def _fetch_page(client: object, url: str, timeout: float):
+    """Страница выдачи: при двух прокси не повторяем запрос в мёртвый туннель."""
+    attempts = 1 if PROXY_POOL.size >= 2 else net_client.DEFAULT_ATTEMPTS
+    return net_client.fetch_page(client, url, timeout=timeout, attempts=attempts)
+
+
 def _recover_empty_pool(settings: Settings, ring: CookieRing, reason: str) -> tuple[dict | None, object]:
     """Нет рабочих cookies — сразу сменить IP и докупить набор."""
     from avito_monitor.cookies import pool
@@ -83,26 +89,43 @@ def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
 
     logger.info(f"Цикл на cookie id={slot.get('id')} [{ring.position()}]")
     collected: dict[int, dict] = {}
+    rotated = False
+
+    def rotate(reason: str) -> bool:
+        nonlocal rotated, client
+        if rotated:
+            logger.warning(f"{reason}: в этом цикле уже уходили на соседний, оставляю собранное")
+            return False
+        _rotate_ip(ring, reason)
+        rotated = True
+        client = ring.client_for(slot)
+        return True
 
     for page in range(1, settings.pages + 1):
         url = catalog.with_page(settings.api_url, page)
         try:
-            status, payload = net_client.fetch_page(client, url, timeout=settings.request_timeout)
+            status, payload = _fetch_page(client, url, settings.request_timeout)
         except RequestException:
-            _rotate_ip(ring, "Прокси сбросил соединение, переключаюсь")
-            client = ring.client_for(slot)
-            status, payload = net_client.fetch_page(client, url, timeout=settings.request_timeout)
+            if not rotate("Прокси сбросил соединение, переключаюсь"):
+                result.failed = True
+                break
+            try:
+                status, payload = _fetch_page(client, url, settings.request_timeout)
+            except RequestException:
+                result.failed = True
+                logger.warning("Соседний прокси тоже сбросил соединение — отдаю цикл")
+                break
 
         if status == net_client.RATE_LIMITED:
             result.throttled = True
-            _rotate_ip(ring, "429: бан по IP, переключаюсь на соседний прокси")
             if PROXY_POOL.size < 2:
-                # Один канал: новый IP ещё не готов, повтор в этом цикле почти
-                # не помогает.
+                rotate("429: бан по IP, меняю адрес")
                 result.failed = True
                 break
-            client = ring.client_for(slot)
-            status, payload = net_client.fetch_page(client, url, timeout=settings.request_timeout)
+            if not rotate("429: бан по IP, переключаюсь на соседний прокси"):
+                result.failed = True
+                break
+            status, payload = _fetch_page(client, url, settings.request_timeout)
             if status == net_client.RATE_LIMITED:
                 result.failed = True
                 logger.warning("429 и на соседнем прокси — отдаю цикл")
@@ -122,13 +145,14 @@ def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
                 logger.error("Пул не дал готовый набор после блокировки")
                 return CycleResult(status=status, failed=True, throttled=True)
             logger.info(f"Продолжаю на cookie id={slot.get('id')}")
-            status, payload = net_client.fetch_page(client, url, timeout=settings.request_timeout)
+            status, payload = _fetch_page(client, url, settings.request_timeout)
 
         if not payload and status == 200:
             result.throttled = True
-            _rotate_ip(ring, "200 без JSON — антибот вместо API, переключаюсь")
-            client = ring.client_for(slot)
-            status, payload = net_client.fetch_page(client, url, timeout=settings.request_timeout)
+            if not rotate("200 без JSON — антибот вместо API, переключаюсь"):
+                result.failed = True
+                break
+            status, payload = _fetch_page(client, url, settings.request_timeout)
 
         result.status = status
         if not payload:
