@@ -1,6 +1,7 @@
 """Вторая страница — только если на первой нечего показать."""
 
-from avito_monitor.monitor.loop import FULL_PAGE_ITEMS, should_open_next_page
+from avito_monitor.config import Settings
+from avito_monitor.monitor.loop import FULL_PAGE_ITEMS, _runtime_settings, should_open_next_page
 
 
 def test_does_not_open_next_page_when_first_has_suitable_ads() -> None:
@@ -49,3 +50,21 @@ def test_does_not_open_next_page_when_listing_ended() -> None:
         )
         is False
     )
+
+
+def test_runtime_settings_strip_paid_serp() -> None:
+    """Старый адрес из spfa чистим на каждом цикле, без перезапуска поиска."""
+    runtime = _runtime_settings(
+        Settings(),
+        {
+            "web_url": "https://www.avito.ru/moskva/telefony?s=104",
+            "api_url": (
+                "https://www.avito.ru/web/1/js/items?locationId=637640"
+                "&presentationType=serp&sort=date&s=1&owner[]=private"
+            ),
+            "category": {},
+        },
+    )
+    assert "presentationType" not in runtime.api_url
+    assert "sort=" not in runtime.api_url
+    assert "s=104" in runtime.api_url

@@ -311,13 +311,35 @@ def test_start_search_returns_links(signed_in: requests.Session, base_url: str) 
 
 
 def test_search_by_url_mode(signed_in: requests.Session, base_url: str) -> None:
-    """Вставленную ссылку нельзя превратить в адрес API без внешнего сервиса."""
+    """Узкий путь без хеша фильтра по-прежнему нельзя собрать без сервиса."""
     response = signed_in.post(
         f"{base_url}/api/search",
         json={"mode": "url", "url": "https://www.avito.ru/moskva/telefony"},
         timeout=10,
     )
     assert response.status_code == 502
+
+
+def test_search_by_url_builds_local_api(signed_in: requests.Session, base_url: str) -> None:
+    """Знакомый регион и категория в ссылке — без обращения к spfa.pro."""
+    response = signed_in.post(
+        f"{base_url}/api/search",
+        json={
+            "mode": "url",
+            "url": (
+                "https://www.avito.ru/moskva/telefony/mobilnye_telefony/"
+                "apple-ASgBAgICAkS0wA3OqzmwwQ2I_Dc?s=104&owner[]=private"
+            ),
+        },
+        timeout=10,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["running"] is True
+    assert "s=104" in payload["api_url"]
+    assert "presentationType" not in payload["api_url"]
+    assert payload["region"]["slug"] == "moskva"
+    signed_in.post(f"{base_url}/api/search/stop", timeout=5)
 
 
 def test_empty_url_is_rejected(signed_in: requests.Session, base_url: str) -> None:

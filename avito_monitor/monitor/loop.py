@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from urllib.parse import parse_qsl, urlsplit
 
 from curl_cffi.requests.exceptions import RequestException
 from loguru import logger
@@ -269,6 +270,13 @@ def run_cycle(
     return selected, result.failed, result.throttled
 
 
+def _sort_from_web(web_url: str) -> str:
+    for key, value in parse_qsl(urlsplit(web_url).query, keep_blank_values=True):
+        if key == "s":
+            return value
+    return "104"
+
+
 def _runtime_settings(settings: Settings, search: dict) -> Settings:
     """Настройки для конкретного поиска из веб-интерфейса.
 
@@ -279,9 +287,21 @@ def _runtime_settings(settings: Settings, search: dict) -> Settings:
     category_id = str((search.get("category") or {}).get("id") or "")
     if category_id != catalog.IPHONE_CATEGORY_ID:
         models = None
+    web_url = search.get("web_url") or ""
+    raw_api = search.get("api_url") or ""
+    api_url = (
+        catalog.normalize_items_api_url(raw_api, prefer_s=_sort_from_web(web_url))
+        if raw_api
+        else ""
+    )
+    if raw_api and api_url != raw_api and (
+        "presentationType" in raw_api or "sort=date" in raw_api
+    ):
+        logger.info("API URL очищен от платной SERP — иначе вся страница «Продвинуто»")
+        logger.info(f"API URL: {api_url}")
     return settings.for_search(
-        web_url=search.get("web_url") or "",
-        api_url=search.get("api_url") or "",
+        web_url=web_url,
+        api_url=api_url,
         seller_skip=tuple(search.get("seller_skip") or ()),
         iphone_models=tuple(models) if models is not None else None,
         iphone_models_in_url=bool(search.get("iphone_models_in_url")),

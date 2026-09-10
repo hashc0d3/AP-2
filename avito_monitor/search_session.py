@@ -196,7 +196,7 @@ def start_search(
         plan = plan_from_url(web_url or query)
         # В своей ссылке пользователь мог уже задать фильтр моделей —
         # тогда по названию их фильтровать не нужно.
-        models_in_url = iphone_params.has_model_params(plan.web_url) or "f=" in plan.web_url
+        models_in_url = iphone_params.has_model_params(plan.web_url)
         api_url = resolve_api_url(plan.web_url)
     else:
         plan = plan_search(query, region_slug, category_id, iphone_models)

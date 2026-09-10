@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from avito_monitor.avito import catalog, iphone, iphone_params
-from avito_monitor.avito.search import plan_search
+from avito_monitor.avito.search import plan_from_url, plan_search, resolve_api_url
 
 
 def _web_url_with_models(models: list[str] | None, region: str = "moskva") -> str:
@@ -124,6 +124,71 @@ def test_with_page_replaces_existing_page() -> None:
     assert catalog.with_page(second, 3).count("page=") == 1
 
 
+def test_normalize_drops_serp_mixers() -> None:
+    dirty = (
+        "https://www.avito.ru/web/1/js/items?locationId=637640"
+        "&presentationType=serp&sort=date&s=1&owner[]=private"
+    )
+    clean = catalog.normalize_items_api_url(dirty, prefer_s="104")
+    assert "presentationType" not in clean
+    assert "sort=" not in clean
+    assert "s=104" in clean
+    assert "privateOnly=1" in clean
+    assert "user=1" in clean
+
+
+def test_api_url_from_pasted_apple_link() -> None:
+    web = (
+        "https://www.avito.ru/moskva/telefony/mobilnye_telefony/"
+        "apple-ASgBAgICAkS0wA3OqzmwwQ2I_Dc?cd=1&s=104&owner[]=private"
+    )
+    url = catalog.api_url_from_web_url(web)
+    assert url is not None
+    assert "locationId=637640" in url
+    assert "categoryId=84" in url
+    assert "s=104" in url
+    assert "f=ASgBAgICAkS0wA3OqzmwwQ2I_Dc" in url
+    assert "presentationType" not in url
+    assert "sort=date" not in url
+
+
+def test_api_url_from_pasted_link_keeps_query_and_price() -> None:
+    web = "https://www.avito.ru/moskva?q=iphone&pmin=10000&s=104"
+    url = catalog.api_url_from_web_url(web)
+    assert url is not None
+    assert "q=iphone" in url
+    assert "pmin=10000" in url
+    assert "locationId=637640" in url
+    assert "categoryId=" not in url
+
+
+def test_bare_category_path_needs_service() -> None:
+    """/moskva/telefony без хеша и без q — не угадываем categoryId."""
+    assert catalog.api_url_from_web_url("https://www.avito.ru/moskva/telefony") is None
+
+
+def test_plan_from_url_reads_region() -> None:
+    plan = plan_from_url(
+        "https://www.avito.ru/sankt-peterburg/telefony/mobilnye_telefony/"
+        "apple-ASgBAgICAkS0wA3OqzmwwQ2I_Dc?s=104"
+    )
+    assert plan.region.slug == "sankt-peterburg"
+    assert plan.category is not None
+    assert plan.category.id == catalog.IPHONE_CATEGORY_ID
+
+
+def test_resolve_sanitizes_service_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    dirty = (
+        "https://www.avito.ru/web/1/js/items?locationId=653240"
+        "&presentationType=serp&sort=date&s=1"
+    )
+    monkeypatch.setattr("avito_monitor.spfa.convert_avito_url", lambda _url: dirty)
+    url = resolve_api_url("https://www.avito.ru/kazan/telefony?s=104")
+    assert "presentationType" not in url
+    assert "sort=" not in url
+    assert "s=104" in url
+
+
 # ── Фильтр моделей ─────────────────────────────────────────────────────────
 
 
@@ -174,6 +239,16 @@ def test_strip_removes_model_filter() -> None:
     stripped = iphone_params.strip_model_params(url)
     assert "1642359" not in stripped
     assert iphone_params.has_model_params(stripped) is False
+
+
+def test_retarget_moves_web_model_codes_to_api() -> None:
+    web_style = (
+        "https://www.avito.ru/web/1/js/items?categoryId=84&locationId=637640"
+        f"&params[{iphone_params.MODEL_PARAM_WEB}][0]=1642359"
+    )
+    updated = iphone_params.retarget_web_model_params(web_style)
+    assert f"params%5B{iphone_params.MODEL_PARAM_API}%5D%5B0%5D=1642359" in updated
+    assert str(iphone_params.MODEL_PARAM_WEB) not in updated
 
 
 def test_models_ignored_for_other_categories() -> None:

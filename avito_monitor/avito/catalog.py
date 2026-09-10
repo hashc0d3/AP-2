@@ -45,6 +45,11 @@ _KNOWN_LOCATION_IDS = {
 _LOCATION_ID_RE = re.compile(r"(?:^|[?&])locationId=(\d+)")
 # Хеш фильтра в пути категории: apple-ASgBAgIC…
 _FILTER_HASH_RE = re.compile(r"-(ASgB[\w-]+)$")
+_API_PATH_MARKER = "/web/1/js/items"
+# Эти ключи на JSON SERP подмешивают платную выдачу вместо «по дате».
+_DROP_FROM_ITEMS_API = frozenset(
+    {"presentationType", "sort", "p", "page", "context", "verticalCategoryId"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,7 +156,122 @@ def location_id_from_api_url(api_url: str) -> str | None:
 def region_slug_from_web_url(web_url: str) -> str:
     """Первый сегмент пути веб-ссылки Avito — это регион."""
     path = urlsplit(web_url).path.strip("/")
-    return path.split("/", 1)[0] if path else regions.default_region().slug
+    if not path or path.startswith("web/"):
+        return regions.default_region().slug
+    return path.split("/", 1)[0]
+
+
+def location_id_for_slug(slug: str) -> str | None:
+    """locationId региона из кэша; ``None`` — ещё не встречали этот slug."""
+    key = (slug or "").strip()
+    if not key:
+        return None
+    cache = _load_location_ids()
+    return cache.get(key) or cache.get(regions.web_slug(key))
+
+
+def category_from_web_url(web_url: str) -> Category | None:
+    """Категория из пути веб-ссылки, если она есть в нашем каталоге."""
+    path = urlsplit(web_url).path.strip("/")
+    if not path or path.startswith("web/"):
+        return None
+    parts = path.split("/")
+    rest = "/".join(parts[1:])
+    if not rest:
+        return ALL_CATEGORY
+    incoming_bare = _FILTER_HASH_RE.sub("", rest)
+    for category in _categories():
+        if rest == category.path or incoming_bare == _FILTER_HASH_RE.sub("", category.path):
+            return category
+    return None
+
+
+def _path_filter_hash(path_after_region: str) -> str:
+    match = _FILTER_HASH_RE.search((path_after_region or "").strip("/"))
+    return match.group(1) if match else ""
+
+
+def _rebuild_items_url(query: list[tuple[str, str]]) -> str:
+    return f"{ITEMS_API_URL}?{urlencode(query)}"
+
+
+def normalize_items_api_url(api_url: str, *, prefer_s: str | None = None) -> str:
+    """Привести адрес JSON API к той же выдаче, что веб-поиск «по дате».
+
+    ``presentationType=serp`` и ``sort=date`` подмешивают платные карточки:
+    на сайте при этом обычные объявления, а в JSON — все «Продвинуто».
+    """
+    split = urlsplit(api_url)
+    raw = parse_qsl(split.query, keep_blank_values=True)
+    sort_s = prefer_s or next((value for key, value in raw if key == "s"), None) or "104"
+    query = [(key, value) for key, value in raw if key not in _DROP_FROM_ITEMS_API and key != "s"]
+    query.append(("s", sort_s))
+    keys = {key for key, _ in query}
+    if any(key.startswith("owner") and value == "private" for key, value in query):
+        if "privateOnly" not in keys:
+            query.append(("privateOnly", "1"))
+        if "user" not in keys:
+            query.append(("user", "1"))
+    path = split.path if split.path and _API_PATH_MARKER in split.path else _API_PATH_MARKER
+    return urlunsplit(
+        (split.scheme or "https", split.netloc or "www.avito.ru", path, urlencode(query), "")
+    )
+
+
+def api_url_from_web_url(web_url: str) -> str | None:
+    """Собрать ``/web/1/js/items`` из вставленной ссылки Avito.
+
+    ``None`` — не хватает ``locationId`` или в ссылке нет ни категории,
+    ни ``f``, ни текстового запроса: тогда нужен внешний сервис.
+    """
+    link = (web_url or "").strip()
+    if not link:
+        return None
+    split = urlsplit(link)
+    host = (split.netloc or "").lower()
+    if host and "avito.ru" not in host:
+        return None
+    if _API_PATH_MARKER in (split.path or ""):
+        return normalize_items_api_url(link)
+
+    parts = [part for part in split.path.strip("/").split("/") if part]
+    if not parts:
+        return None
+    location_id = location_id_for_slug(parts[0])
+    if not location_id:
+        return None
+
+    category_path = "/".join(parts[1:])
+    category = category_from_web_url(link)
+    incoming = parse_qsl(split.query, keep_blank_values=True)
+    path_hash = _path_filter_hash(category_path)
+    has_hint = any(key in {"f", "q", "categoryId"} for key, _ in incoming)
+    if category is None and not path_hash and not has_hint:
+        return None
+
+    query = [(key, value) for key, value in incoming if key not in _DROP_FROM_ITEMS_API]
+    query = [(key, value) for key, value in query if key != "locationId"]
+    query.append(("locationId", location_id))
+
+    if (
+        category is not None
+        and category.api_category_id
+        and not any(key == "categoryId" for key, _ in query)
+    ):
+        query.append(("categoryId", category.api_category_id))
+        present = {key for key, _ in query}
+        for key, value in category.api_params:
+            api_key = f"params[{key}]"
+            if api_key not in present and not any(item.startswith(api_key) for item in present):
+                query.append((api_key, value))
+
+    if not any(key == "f" for key, _ in query):
+        f_hash = path_hash or (category_filter_hash(category) if category else "")
+        if f_hash:
+            query.append(("f", f_hash))
+
+    prefer_s = next((value for key, value in incoming if key == "s"), None)
+    return normalize_items_api_url(_rebuild_items_url(query), prefer_s=prefer_s)
 
 
 def remember_location_id(web_url: str, api_url: str) -> None:

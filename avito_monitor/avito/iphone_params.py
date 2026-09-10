@@ -95,3 +95,31 @@ def has_model_params(url: str) -> bool:
         f"params%5B{param}%5D" in query or f"params[{param}]" in query
         for param in (MODEL_PARAM_WEB, MODEL_PARAM_API)
     )
+
+
+def retarget_web_model_params(url: str) -> str:
+    """Переписать веб-коды моделей в коды JSON API.
+
+    Вставленная ссылка несёт ``params[121588]``, а ``/web/1/js/items``
+    понимает ``params[110617]``. Без замены фильтр моделей на API молчит.
+    """
+    if _API_PATH_MARKER not in url or not has_model_params(url):
+        return url
+    query = parse_qsl(urlsplit(url).query, keep_blank_values=True)
+    values: list[str] = []
+    kept: list[tuple[str, str]] = []
+    type_key = f"params[{TYPE_PARAM}]"
+    prefixes = (f"params[{MODEL_PARAM_WEB}]", f"params[{MODEL_PARAM_API}]")
+    for key, value in query:
+        if key == type_key or any(key.startswith(prefix) for prefix in prefixes):
+            if key != type_key:
+                values.append(value)
+            continue
+        kept.append((key, value))
+    if not values:
+        return url
+    kept.extend(
+        (f"params[{MODEL_PARAM_API}][{index}]", value) for index, value in enumerate(values)
+    )
+    kept.append((type_key, str(TYPE_VALUE)))
+    return _rebuild(url, kept)

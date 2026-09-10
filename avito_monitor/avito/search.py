@@ -1,26 +1,28 @@
 """Подготовка поискового запроса: ссылка веб-поиска и адрес JSON API.
 
-Avito не даёт публичного API. Ссылку веб-поиска мы собираем сами, а её
-превращение в адрес внутреннего JSON API умеет только внешний сервис
-spfa.pro, у которого жёсткий лимит запросов. Поэтому порядок такой:
+Avito не даёт публичного API. Ссылку веб-поиска мы собираем сами.
+Внутренний JSON API собираем в таком порядке:
 
-1. если категория знакома и ``locationId`` региона уже известен — собираем
-   адрес API локально и никого не спрашиваем;
-2. иначе один раз спрашиваем сервис и кэшируем ответ в памяти процесса,
-   попутно запоминая ``locationId`` региона на диск.
+1. знакомая категория и известный ``locationId`` — локально;
+2. вставленная пользователем ссылка, из которой хватает региона и фильтра;
+3. иначе один раз спрашиваем spfa.pro и кэшируем ответ.
+
+После любого источника адрес чистим: ``presentationType=serp`` и
+``sort=date`` дают платную выдачу, не ту, что на сайте «по дате».
 """
 
 from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
+from urllib.parse import parse_qsl, urlsplit
 
 from loguru import logger
 
 from avito_monitor import spfa
 from avito_monitor.avito import catalog, iphone, iphone_params
 from avito_monitor.avito.catalog import Category
-from avito_monitor.avito.regions import Region, region_or_default
+from avito_monitor.avito.regions import Region, find_region, region_or_default
 
 _cache_lock = threading.Lock()
 _api_url_cache: dict[str, str] = {}
@@ -80,17 +82,36 @@ def plan_search(
     )
 
 
+def _normalize_pasted_url(web_url: str) -> str:
+    link = (web_url or "").strip()
+    if link and "://" not in link:
+        link = f"https://{link.lstrip('/')}"
+    return link
+
+
 def plan_from_url(web_url: str) -> SearchPlan:
     """План для готовой ссылки Avito, вставленной пользователем."""
-    link = (web_url or "").strip()
+    link = _normalize_pasted_url(web_url)
     if not link:
         raise ValueError("Укажите ссылку Avito")
+    slug = catalog.region_slug_from_web_url(link)
+    try:
+        region = find_region(slug)
+    except ValueError:
+        region = region_or_default("")
     return SearchPlan(
         query=link,
-        region=region_or_default(""),
-        category=None,
+        region=region,
+        category=catalog.category_from_web_url(link),
         web_url=link,
     )
+
+
+def _s_from_url(url: str) -> str | None:
+    for key, value in parse_qsl(urlsplit(url).query, keep_blank_values=True):
+        if key == "s":
+            return value
+    return None
 
 
 def resolve_api_url(
@@ -104,8 +125,20 @@ def resolve_api_url(
         local = catalog.build_api_url(region_slug, category_id, query=query)
         if local:
             logger.info("API URL собран локально, без обращения к сервису")
-            return local
-    return _convert_via_service(web_url)
+            return _finish_api_url(local, web_url)
+    from_web = catalog.api_url_from_web_url(web_url)
+    if from_web:
+        logger.info("API URL собран из ссылки пользователя, без обращения к сервису")
+        return _finish_api_url(from_web, web_url)
+    return _finish_api_url(_convert_via_service(web_url), web_url)
+
+
+def _finish_api_url(api_url: str, web_url: str) -> str:
+    """Выкинуть параметры платной SERP и переписать коды моделей."""
+    cleaned = catalog.normalize_items_api_url(
+        api_url, prefer_s=_s_from_url(web_url) or "104"
+    )
+    return iphone_params.retarget_web_model_params(cleaned)
 
 
 def _convert_via_service(web_url: str) -> str:
