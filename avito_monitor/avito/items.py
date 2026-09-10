@@ -52,7 +52,8 @@ _HIDDEN_PHONE_KEYS = ("isPhoneHidden", "phoneHidden", "isPhoneDisabled")
 _SELLER_NAME_KEYS = ("sellerName", "userName", "shopName", "companyName")
 _SELLER_BLOB_KEYS = ("user", "seller", "shop", "profile")
 _SELLER_TEXT_KEYS = ("title", "name", "text", "value", "link", "slug")
-_COMPANY_URL_MARKERS = ("/brands/", "/shop/", "/company/")
+# ``/shop/`` не берём: Avito так размечает и частников с доставкой.
+_COMPANY_URL_MARKERS = ("/brands/", "/company/")
 _PRIVATE_BADGE = "частное лицо"
 
 _PROMOTED_TITLE = "Продвинуто"
@@ -270,9 +271,9 @@ def _has_private_badge(item: dict) -> bool:
 def is_company_seller(item: dict) -> bool:
     """Магазин или бренд, а не частное лицо.
 
-    Смотрим только профиль в ``UserInfoStep``. ``shopId`` и ``ShopInfoStep``
-    бывают у частников с доставкой — ссылка ``/shop/`` у корзины их не делает
-    магазином. Бейдж «Частное лицо» важнее любой ссылки.
+    Смотрим только профиль в ``UserInfoStep``. Ссылка ``/shop/`` — не магазин:
+    так Avito помечает и частников с корзиной. Магазин — это ``/brands/``
+    или ``/company/``. Бейдж «Частное лицо» важнее любой ссылки.
     """
     if _has_private_badge(item):
         return False
@@ -280,6 +281,16 @@ def is_company_seller(item: dict) -> bool:
     if any("/user/" in link for link in links):
         return False
     return any(marker in link for link in links for marker in _COMPANY_URL_MARKERS)
+
+
+def all_items_are_companies(items: list[dict]) -> bool:
+    """Вся страница размечена как магазин — фильтр по компании врёт.
+
+    Как с бейджем «Продвинуто»: если отсечь всех, лента пустеет, хотя на
+    сайте те же объявления часто частные.
+    """
+    found = [item for item in items if item_id(item) is not None]
+    return len(found) >= 10 and all(is_company_seller(item) for item in found)
 
 
 def is_private_seller(item: dict) -> bool:

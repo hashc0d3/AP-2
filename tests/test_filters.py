@@ -84,6 +84,16 @@ def test_private_seller_with_delivery_shop_is_allowed() -> None:
     assert filters.seller_is_allowed(item, private_only=True) is True
 
 
+def test_shop_profile_passes_private_only(base_settings: Settings) -> None:
+    item = _with_seller("/shop/seller")
+    assert filters.seller_is_allowed(item, private_only=True) is True
+    selected, stats = filters.select_new_ads(
+        [item], replace(base_settings, private_only=True), set(), first_run=False
+    )
+    assert [ad["id"] for ad in selected] == [1]
+    assert stats.company == 0
+
+
 def test_delivery_shop_without_user_profile_is_allowed() -> None:
     """Иначе новые частные объявления пропадали как «компания»."""
     item = _ad(iva={"ShopInfoStep": [{"payload": {"link": "/shop/delivery"}}]}, shopId=99)
@@ -182,6 +192,20 @@ def test_ads_published_before_start_are_dropped(base_settings: Settings) -> None
     )
     assert [ad["id"] for ad in selected] == [1]
     assert stats.before_start == 1
+
+
+def test_ads_posted_just_before_start_still_pass(base_settings: Settings) -> None:
+    """Часы Avito и клик могут разъехаться на минуту-две."""
+    started = time.time()
+    selected, stats = filters.select_new_ads(
+        [_ad(1, age=90)],
+        base_settings,
+        set(),
+        first_run=False,
+        started_at=started,
+    )
+    assert [ad["id"] for ad in selected] == [1]
+    assert stats.before_start == 0
 
 
 def test_ads_without_timestamp_are_not_new(base_settings: Settings) -> None:

@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from avito_monitor.avito import iphone
 from avito_monitor.avito import items as items_mod
@@ -69,6 +69,8 @@ class FilterStats:
     before_start: int = 0
     """Опубликованы до нажатия «Начать поиск»."""
     promotion_badge_ignored: bool = False
+    company_filter_ignored: bool = False
+    company_hints: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
         """Строка для лога: перечислены только сработавшие фильтры."""
@@ -85,6 +87,8 @@ class FilterStats:
         parts = [f"{label}: {count}" for label, count in reasons if count]
         if self.promotion_badge_ignored:
             parts.append("бейдж «Продвинуто» на всех, не прячу")
+        if self.company_filter_ignored:
+            parts.append("все как магазин, не прячу")
         return ", ".join(parts)
 
 
@@ -115,6 +119,9 @@ def select_new_ads(
     hide_promoted = settings.ignore_promotion and not items_mod.all_items_promoted(items)
     if settings.ignore_promotion and not hide_promoted and items:
         stats.promotion_badge_ignored = True
+    hide_companies = settings.private_only and not items_mod.all_items_are_companies(items)
+    if settings.private_only and not hide_companies and items:
+        stats.company_filter_ignored = True
 
     for item in items:
         ad_id = items_mod.item_id(item)
@@ -129,8 +136,11 @@ def select_new_ads(
         if seller_is_skipped(item, settings.seller_skip):
             stats.seller_skipped += 1
             continue
-        if not seller_is_allowed(item, private_only=settings.private_only):
+        if hide_companies and not seller_is_allowed(item, private_only=True):
             stats.company += 1
+            if len(stats.company_hints) < 3:
+                links = items_mod.seller_profile_links(item)
+                stats.company_hints.append(f"{ad_id} {links[0] if links else 'без ссылки'}")
             continue
         if not title_matches(item, settings.title_must_contain, settings.title_skip):
             stats.title += 1
@@ -160,9 +170,13 @@ def select_new_ads(
     return selected, stats
 
 
+START_GRACE_SEC = 180
+"""Запас на рассинхрон часов Avito и момент нажатия «Начать поиск»."""
+
+
 def _published_after(item: dict, started_at: float) -> bool:
-    """Опубликовано ли объявление после нажатия «Начать поиск»."""
+    """Опубликовано ли объявление после старта поиска (с небольшим запасом)."""
     published = items_mod.published_at(item)
     if published is None:
         return False
-    return published.timestamp() > started_at
+    return published.timestamp() > started_at - START_GRACE_SEC

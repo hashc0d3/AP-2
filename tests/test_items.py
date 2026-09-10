@@ -128,11 +128,16 @@ def test_private_seller_from_user_link() -> None:
     assert items.is_company_seller(item) is False
 
 
-@pytest.mark.parametrize("link", ["/brands/vnk?src=x", "/shop/foo", "/company/bar"])
+@pytest.mark.parametrize("link", ["/brands/vnk?src=x", "/company/bar"])
 def test_company_seller_from_link(link: str) -> None:
     item = _with_profile(link)
     assert items.is_company_seller(item) is True
     assert items.is_private_seller(item) is False
+
+
+def test_shop_profile_is_not_a_company() -> None:
+    """Частники с доставкой получают /shop/ в профиле — это не бренд."""
+    assert items.is_company_seller(_with_profile("/shop/foo")) is False
 
 
 def test_shop_id_does_not_override_private_profile() -> None:
@@ -155,8 +160,8 @@ def test_delivery_shop_without_user_link_is_not_a_company() -> None:
     assert items.is_company_seller(item) is False
 
 
-def test_private_badge_overrides_shop_profile() -> None:
-    item = _with_profile("/shop/foo")
+def test_private_badge_overrides_brand_profile() -> None:
+    item = _with_profile("/brands/vnk")
     item["iva"]["UserInfoStep"][0]["payload"]["profile"]["badge"] = {"title": "Частное лицо"}
     assert items.is_company_seller(item) is False
     assert items.is_private_seller(item) is True

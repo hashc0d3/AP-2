@@ -225,6 +225,8 @@ def run_cycle(
         return [], result.failed, result.throttled
 
     logger.info(f"Подходящих: {len(selected)}" + (f" ({summary})" if summary else ""))
+    if stats.company_hints:
+        logger.info("Пример «компания»: " + "; ".join(stats.company_hints))
     if not selected:
         logger.info("Новых объявлений нет")
         return [], result.failed, result.throttled
