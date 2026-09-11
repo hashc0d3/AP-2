@@ -98,18 +98,13 @@ python -m avito_monitor.tools.bench_speed --api 5
 
 ```
 poll_interval = 3
-request_timeout = 20
+request_timeout = 12
 cookie_pool_size = 16
 ```
 
-Сейчас в логе `темп 4.0 с` и `timed out after 5001 milliseconds` — значит,
-контейнер ещё на старых `4` и `5`. После правки:
-
-```bash
-docker compose up -d --build
-```
-
-В логе должно стать `темп 3.0 с`, а таймаут с 81 КБ в ответе — исчезнуть.
+`request_timeout` — общее время запроса. Значение выше 12 с обрезается:
+иначе curl складывает соединение и тело (в логе 25 с на 130 КБ без JSON).
+После выкладки: `docker compose up -d --build`.
 
 `20085` с `0 bytes received` — мёртвый туннель, таймаут его не вылечит.
 Если после выкладки он так же сыпется, попросите у оператора другой порт

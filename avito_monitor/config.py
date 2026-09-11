@@ -82,7 +82,7 @@ class Settings:
     """Один набор cookies не бьёт Avito чаще, чем раз в столько секунд."""
     retry_pause: float = 12.0
     """Пауза после неудачного цикла."""
-    request_timeout: float = 20.0
+    request_timeout: float = 12.0
     ip_change_wait: float = 25.0
 
     # ── Пул cookies ─────────────────────────────────────────────────────
@@ -109,7 +109,9 @@ class Settings:
             self, "poll_interval_max", max(self.poll_interval, self.poll_interval_max)
         )
         object.__setattr__(self, "retry_pause", max(3.0, self.retry_pause))
-        object.__setattr__(self, "request_timeout", max(3.0, self.request_timeout))
+        object.__setattr__(
+            self, "request_timeout", min(12.0, max(3.0, self.request_timeout))
+        )
         object.__setattr__(self, "ip_change_wait", max(1.0, self.ip_change_wait))
         object.__setattr__(self, "cookie_pool_size", max(1, self.cookie_pool_size))
         object.__setattr__(self, "cookie_unblock_pause", max(30, self.cookie_unblock_pause))

@@ -20,8 +20,7 @@ DEFAULT_IMPERSONATE = "chrome131_android"
 DEFAULT_ATTEMPTS = 2
 RETRY_PAUSE = 0.5
 CONNECT_TIMEOUT = 5.0
-"""Сколько ждать установку соединения. Мёртвый туннель отваливается быстро,
-а тело JSON может качаться до ``request_timeout``."""
+"""Сколько ждать установку соединения. Мёртвый туннель отваливается быстро."""
 
 RATE_LIMITED = 429
 """Avito ограничил IP: cookies целы, нужен другой адрес."""
@@ -33,16 +32,18 @@ REJECTED_STATUSES = (*COOKIE_BLOCKED, RATE_LIMITED)
 
 
 def call_timeout(timeout: float) -> float | tuple[float, float]:
-    """Таймаут для curl: соединение рвём быстро, тело ждём до ``timeout``.
+    """Таймаут для curl: ``timeout`` — всё время запроса, не сумма частей.
 
-    Один общий лимит в 5 с обрывает уже качающийся JSON (в логе
-    ``timed out … with 81001 bytes received``) и зря гоняет смену IP.
+    Кортеж ``(connect, read)`` curl складывает: ``(5, 20)`` в логе дало
+    25 с и цикл 27 с на уже качающемся JSON. Поэтому ``read`` — остаток
+    до общего лимита, а не второй полный таймаут.
     """
-    timeout = max(3.0, timeout)
-    connect = min(CONNECT_TIMEOUT, timeout)
-    if connect >= timeout:
-        return timeout
-    return (connect, timeout)
+    total = max(3.0, timeout)
+    connect = min(CONNECT_TIMEOUT, total)
+    read = total - connect
+    if read <= 0:
+        return total
+    return (connect, read)
 
 
 def build_client(session: dict, proxy_string: str = "") -> Session:

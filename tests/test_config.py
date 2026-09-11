@@ -216,6 +216,7 @@ def test_interval_max_is_never_below_interval(config_files) -> None:
         ("poll_interval", 0.1, 1.0),
         ("per_cookie_interval", 1, 3.0),
         ("request_timeout", 0, 3.0),
+        ("request_timeout", 20, 12.0),
         ("cookie_pool_size", 0, 1),
         ("cookie_unblock_pause", 5, 30),
     ],
