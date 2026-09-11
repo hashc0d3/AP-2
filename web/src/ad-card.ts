@@ -10,7 +10,7 @@
 import { itemWebUrl } from "./avito-links";
 import { ICON_CLOSE, ICON_EXT, ICON_PHONE, ICON_STAR, ICON_STAR_OUTLINE } from "./card-icons";
 import { isFavorite, toggleFavorite } from "./favorites";
-import { collapseDescText, displayPrice, escapeHtml, formatAddedAt, imgSrc } from "./format";
+import { collapseDescText, displayPrice, escapeHtml, formatCardTimes, imgSrc } from "./format";
 import { openImageLightbox } from "./image-lightbox";
 import { regionTimezone } from "./region-timezones";
 import type { Ad } from "./types";
@@ -18,7 +18,7 @@ import type { Ad } from "./types";
 export type AdCardRenderer = {
   /** Готовый узел карточки. */
   create: (ad: Ad, fresh: boolean) => HTMLElement;
-  /** Пересчитать «сколько назад» у всех карточек в ленте. */
+  /** Обновить часы на карточках при смене региона. */
   refreshTimes: () => void;
   /** Применить режим «без фотографий» к ленте и уже показанным карточкам. */
   applyHideImages: () => void;
@@ -47,10 +47,11 @@ export function createAdCardRenderer(opts: {
 
   const refreshTimes = (): void => {
     const timeZone = regionTimezone(opts.regionSlug());
-    opts.feed.querySelectorAll<HTMLElement>(".card-meta[data-ts]").forEach((meta) => {
-      const ts = Number(meta.dataset.ts);
-      if (!ts) return;
-      const parts = [formatAddedAt(ts, timeZone), meta.dataset.address || ""];
+    opts.feed.querySelectorAll<HTMLElement>(".card-meta").forEach((meta) => {
+      const avitoTs = Number(meta.dataset.ts) || undefined;
+      const receivedAt = Number(meta.dataset.receivedAt) || undefined;
+      const times = formatCardTimes(avitoTs, receivedAt, timeZone);
+      const parts = [times, meta.dataset.address || ""];
       meta.textContent = parts.filter(Boolean).join(" · ");
     });
   };
@@ -107,13 +108,13 @@ function mediaHtml(ad: Ad): string {
 }
 
 function metaHtml(ad: Ad, timeZone: string): string {
-  const added = ad.ts ? formatAddedAt(ad.ts, timeZone) : ad.published || "";
-  const text = [added, ad.address].filter(Boolean).join(" · ");
+  const receivedAt = ad.received_at || Date.now() / 1000;
+  const times = formatCardTimes(ad.ts, receivedAt, timeZone);
+  const text = [times, ad.address].filter(Boolean).join(" · ");
   if (!text) return "";
-  // data-ts и data-address нужны, чтобы обновлять «сколько назад» без
-  // перерисовки карточки целиком.
   const attrs = [
     ad.ts ? ` data-ts="${ad.ts}"` : "",
+    ` data-received-at="${receivedAt}"`,
     ad.address ? ` data-address="${escapeHtml(ad.address)}"` : "",
   ].join("");
   return `<div class="card-meta"${attrs}>${escapeHtml(text)}</div>`;

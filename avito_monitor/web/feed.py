@@ -50,7 +50,7 @@ class AdFeed:
             data = json.loads(ADS_PATH.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             data = None
-        now = time.time()
+        now = int(time.time())
         with self._lock:
             loaded = data[: self._max_ads] if isinstance(data, list) else []
             for ad in loaded:
@@ -76,7 +76,7 @@ class AdFeed:
         """
         if not ads:
             return []
-        now = time.time()
+        now = int(time.time())
         with self._lock:
             known = {item.get("id") for item in self._ads}
             incoming = []

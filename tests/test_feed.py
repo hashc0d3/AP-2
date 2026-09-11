@@ -63,6 +63,14 @@ def test_empty_publish_does_nothing(fresh_feed: AdFeed) -> None:
     assert fresh_feed.publish([]) == []
 
 
+def test_publish_stamps_when_ad_hit_the_feed(fresh_feed: AdFeed) -> None:
+    before = int(time.time())
+    added = fresh_feed.publish([_ad(1)])
+    stamp = added[0]["received_at"]
+    assert isinstance(stamp, int)
+    assert before <= stamp <= int(time.time())
+
+
 def test_feed_keeps_ads_regardless_of_age(fresh_feed: AdFeed) -> None:
     """Возраст на Avito и время в ленте больше не выкидывают карточку."""
     now = time.time()

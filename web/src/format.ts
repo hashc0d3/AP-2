@@ -34,30 +34,30 @@ export function displayPrice(price: string): string {
   return price.replace(/[\u00a0\u202f\u2009]/g, " ").trim();
 }
 
-function formatAge(seconds: number): string {
-  const total = Math.max(0, Math.floor(seconds));
-  if (total < 60) return `${total} сек назад`;
-  const minutes = Math.floor(total / 60);
-  if (minutes < 60) return `${minutes} мин назад`;
-  return `${Math.floor(minutes / 60)} ч назад`;
-}
-
-/**
- * Время публикации: часы по времени выбранного региона плюс «сколько назад».
- *
- * Часовой пояс приходит извне, а не берётся из браузера: пользователь может
- * следить за объявлениями Владивостока, сидя в Москве.
- */
-export function formatAddedAt(ts: number, timeZone: string): string {
-  const addedMs = ts * 1000;
-  const clock = new Intl.DateTimeFormat("ru-RU", {
+/** Часы:минуты:секунды в часовом поясе региона, без «N сек назад». */
+export function formatClock(ts: number, timeZone: string): string {
+  return new Intl.DateTimeFormat("ru-RU", {
     timeZone,
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
-  }).format(addedMs);
-  return `${clock} · ${formatAge((Date.now() - addedMs) / 1000)}`;
+  }).format(ts * 1000);
+}
+
+/**
+ * Строка времени на карточке: когда объявление появилось на Avito
+ * и когда попало в нашу ленту.
+ */
+export function formatCardTimes(
+  avitoTs: number | undefined,
+  receivedAt: number | undefined,
+  timeZone: string,
+): string {
+  const parts: string[] = [];
+  if (avitoTs) parts.push(`на Avito ${formatClock(avitoTs, timeZone)}`);
+  if (receivedAt) parts.push(`у нас ${formatClock(receivedAt, timeZone)}`);
+  return parts.join(" · ");
 }
 
 /**
