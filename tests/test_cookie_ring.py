@@ -81,6 +81,24 @@ def test_cookies_ride_their_own_proxy(ring: CookieRing, write_slot) -> None:
     assert len(ports) == 2
 
 
+def test_next_many_picks_distinct_proxies(ring: CookieRing, write_slot) -> None:
+    """Параллельный цикл не должен дважды бить один и тот же IP."""
+    from avito_monitor.net.proxies import PROXY_POOL
+
+    PROXY_POOL.configure(
+        (("u:p@mproxy.site:20085", "http://change-a"), ("u:p@mproxy.site:10341", "http://change-b"))
+    )
+    for cookie_id in ("201", "202", "203", "204"):
+        write_slot(_slot(cookie_id))
+    ring.refresh()
+
+    batch = ring.next_many(2)
+    ports = {ring.proxy_of(slot) for slot, _ in batch}
+
+    assert len(batch) == 2
+    assert len(ports) == 2
+
+
 def test_client_is_rebuilt_when_its_channel_is_banned(
     ring: CookieRing, write_slot, monkeypatch: pytest.MonkeyPatch
 ) -> None:

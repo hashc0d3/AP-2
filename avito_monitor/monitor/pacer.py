@@ -14,6 +14,20 @@ from __future__ import annotations
 from loguru import logger
 
 
+def parallel_width(live_proxies: int) -> int:
+    """Сколько каналов опрашивать в одном цикле.
+
+    До трёх прокси цикл остаётся последовательным: так проще уйти на соседа
+    после 429. С четырёх и больше берём до половины живых, но не больше трёх:
+    за проход снимаются разные снимки SERP, а каждый IP получает запрос
+    примерно раз в ``poll_interval × каналы / ширина`` секунд.
+    """
+    live = max(0, int(live_proxies))
+    if live < 4:
+        return 1
+    return min(3, live // 2)
+
+
 def poll_delay(poll_interval: float, per_cookie_interval: float, cookies: int) -> float:
     """Пауза до следующего цикла.
 

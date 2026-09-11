@@ -2,19 +2,24 @@
 
 Схема одного цикла:
 
-1. взять следующий набор cookies из кольца;
-2. запросить выдачу одним запросом и разобрать JSON;
+1. взять следующий набор cookies из кольца — или несколько на разных каналах;
+2. запросить выдачу и разобрать JSON;
 3. при отказе Avito — увести набор на соседний прокси или взять другой набор;
 4. отфильтровать выдачу и отдать новое в веб-ленту;
 5. выдержать паузу, размер которой определяет :mod:`~.pacer`.
 
 Цикл не запускается сам: он ждёт, пока в веб-интерфейсе нажмут «Начать
 поиск», и останавливается, когда поиск сняли или заменили.
+
+При четырёх и больше живых прокси запрос идёт сразу по нескольким каналам:
+разные cookies видят разные снимки SERP, и уникальные id сливаются в один
+цикл. До трёх каналов опрос остаётся последовательным.
 """
 
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from curl_cffi.requests.exceptions import RequestException
 from loguru import logger
@@ -24,13 +29,14 @@ from avito_monitor.avito import items as items_mod
 from avito_monitor.avito.regions import region_timezone
 from avito_monitor.config import Settings, load_settings
 from avito_monitor.cookies.ring import CookieRing
-from avito_monitor.monitor.pacer import PollPacer, next_interval
+from avito_monitor.monitor.pacer import PollPacer, next_interval, parallel_width
 from avito_monitor.monitor.seen import SeenStore
 from avito_monitor.net import client as net_client
 from avito_monitor.net.proxy import ensure_proxy_bypasses_vpn
 from avito_monitor.net.proxies import PROXY_POOL
 from avito_monitor.paths import ensure_runtime_dirs
 from avito_monitor.search_session import SESSION
+
 
 @dataclass(slots=True)
 class CycleResult:
@@ -42,6 +48,21 @@ class CycleResult:
     """Выдачу получить не удалось."""
     throttled: bool = False
     """Avito ограничивал запросы — стоит сбавить темп."""
+
+
+@dataclass(slots=True)
+class _Probe:
+    """Ответ одного канала до слияния. Кольцо и пул трогает главный поток."""
+
+    status: int = 0
+    items: list[dict] = field(default_factory=list)
+    failed: bool = False
+    throttled: bool = False
+    cookie_id: object = None
+    proxy: str = ""
+    cookie_blocked: bool = False
+    dropped: bool = False
+    antibot: bool = False
 
 
 def _fetch_page(client: object, url: str, timeout: float):
@@ -68,12 +89,138 @@ def _recover_empty_pool(settings: Settings, ring: CookieRing, reason: str) -> tu
     return ring.next()
 
 
+def _unique_items(groups: list[list[dict]]) -> list[dict]:
+    """Слить выдачи каналов: один id — одно объявление, порядок первого появления."""
+    seen: set[object] = set()
+    merged: list[dict] = []
+    for items in groups:
+        for item in items:
+            key = item.get("id")
+            if key is None:
+                merged.append(item)
+                continue
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+    return merged
+
+
+def _probe_listing(settings: Settings, client: object, proxy: str, cookie_id: object) -> _Probe:
+    """Один запрос выдачи без пересадки: сбой разберёт вызывающий поток."""
+    probe = _Probe(cookie_id=cookie_id, proxy=proxy)
+    try:
+        status, payload = _fetch_page(client, settings.api_url, settings.request_timeout)
+    except RequestException:
+        probe.failed = True
+        probe.dropped = True
+        return probe
+
+    probe.status = status
+    if status == net_client.RATE_LIMITED:
+        probe.failed = True
+        probe.throttled = True
+        return probe
+    if status in net_client.COOKIE_BLOCKED:
+        probe.failed = True
+        probe.throttled = True
+        probe.cookie_blocked = True
+        return probe
+    if not payload:
+        probe.failed = True
+        if status == 200:
+            probe.throttled = True
+            probe.antibot = True
+        return probe
+    probe.items = items_mod.extract_items(payload)
+    return probe
+
+
+def _apply_probe_failure(ring: CookieRing, probe: _Probe) -> None:
+    """Увести сгоревший набор или забаненный канал после параллельного запроса."""
+    if probe.cookie_blocked:
+        ring.burn(probe.cookie_id)
+        logger.warning(f"{probe.status}: cookie id={probe.cookie_id} сгорел, IP не меняю")
+        return
+    if probe.dropped:
+        PROXY_POOL.ban(probe.proxy, "Прокси сбросил соединение", wait=False)
+        return
+    if probe.antibot:
+        PROXY_POOL.ban(probe.proxy, "200 без JSON — антибот вместо API", wait=False)
+        return
+    if probe.status == net_client.RATE_LIMITED:
+        PROXY_POOL.ban(probe.proxy, "429: бан по IP", wait=False)
+
+
+def _fetch_items_parallel(settings: Settings, ring: CookieRing, width: int) -> CycleResult:
+    """Снять несколько каналов сразу и слить уникальные объявления."""
+    batch = ring.next_many(width)
+    if not batch:
+        slot, client = _recover_empty_pool(settings, ring, "Нет рабочих cookies — докупаю")
+        if slot is None or client is None:
+            logger.error("Нет готового cookie — не бью Avito заблокированным набором")
+            return CycleResult(failed=True)
+        batch = [(slot, client)]
+
+    labels = ", ".join(
+        f"id={slot.get('id')} через {ring.proxy_of(slot).rsplit('@', 1)[-1] or 'без прокси'}"
+        for slot, _ in batch
+    )
+    logger.info(f"Цикл параллельно ×{len(batch)}: {labels}")
+    logger.info("Запрашиваю выдачу, presentationType=serp, sort=date")
+
+    probes: list[_Probe | None] = [None] * len(batch)
+    with ThreadPoolExecutor(max_workers=len(batch), thread_name_prefix="avito-fetch") as pool:
+        futures = {
+            pool.submit(
+                _probe_listing,
+                settings,
+                client,
+                ring.proxy_of(slot),
+                slot.get("id"),
+            ): index
+            for index, (slot, client) in enumerate(batch)
+        }
+        for future in as_completed(futures):
+            probes[futures[future]] = future.result()
+
+    groups: list[list[dict]] = []
+    throttled = False
+    last_status = 0
+    any_ok = False
+    for probe, (slot, _) in zip(probes, batch):
+        if probe is None:
+            continue
+        last_status = probe.status or last_status
+        if probe.failed:
+            throttled = throttled or probe.throttled
+            _apply_probe_failure(ring, probe)
+            logger.warning(f"id={slot.get('id')}: отказ status={probe.status or 'сеть'}")
+            continue
+        any_ok = True
+        groups.append(probe.items)
+        logger.info(f"id={slot.get('id')}: {len(probe.items)} объявлений")
+
+    if not any_ok:
+        return CycleResult(status=last_status, failed=True, throttled=throttled)
+
+    items = _unique_items(groups)
+    raw = sum(len(group) for group in groups)
+    logger.info(f"Получено из JSON: {raw} объявлений, уникальных {len(items)}")
+    return CycleResult(status=last_status, items=items, throttled=throttled)
+
+
 def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
-    """Забрать выдачу Avito одним запросом и разобрать JSON как есть.
+    """Забрать выдачу Avito и разобрать JSON как есть.
 
     Запрос как 6 сентября: ``presentationType=serp`` и ``sort=date``,
     без ``p=1`` / ``p=2`` и без принудительного ``s=104``.
+    При четырёх и больше живых каналах опрос идёт сразу по нескольким.
     """
+    width = parallel_width(PROXY_POOL.live_size)
+    if width > 1:
+        return _fetch_items_parallel(settings, ring, width)
+
     result = CycleResult()
     slot, client = ring.next()
     if slot is None or client is None:
@@ -324,7 +471,9 @@ def main() -> None:
         ready = ring.refresh()
 
     logger.info(
-        f"Готовых cookies: {ready}, опрос от {settings.poll_interval:.0f} с "
+        f"Готовых cookies: {ready}, прокси {PROXY_POOL.size}, "
+        f"параллельно ×{parallel_width(PROXY_POOL.live_size)}, "
+        f"опрос от {settings.poll_interval:.0f} с "
         f"(на набор не чаще {settings.per_cookie_interval:.0f} с, "
         f"откат при банах до {settings.poll_interval_max:.0f} с). "
         "Жду «Начать поиск» в веб-интерфейсе"

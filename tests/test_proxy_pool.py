@@ -38,6 +38,19 @@ class FakeChange:
             time.sleep(0.01)
 
 
+def test_live_size_ignores_channel_that_changes_ip(monkeypatch) -> None:
+    change = FakeChange(monkeypatch)
+    pool = ProxyPool()
+    pool.configure((A, B))
+    assert pool.live_size == 2
+
+    pool.ban(A[0], "429")
+    assert change.started.wait(timeout=1.0)
+    assert pool.live_size == 1
+    change.complete(pool)
+    assert pool.live_size == 2
+
+
 def test_cookies_are_split_between_channels(monkeypatch) -> None:
     """Ради этого всё и затевалось: каждый IP берёт свою половину запросов."""
     FakeChange(monkeypatch)

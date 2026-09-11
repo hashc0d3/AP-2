@@ -4,7 +4,24 @@ from __future__ import annotations
 
 import pytest
 
-from avito_monitor.monitor.pacer import PollPacer, next_interval, poll_delay
+from avito_monitor.monitor.pacer import PollPacer, next_interval, parallel_width, poll_delay
+
+
+@pytest.mark.parametrize(
+    ("live", "expected"),
+    [
+        (0, 1),
+        (1, 1),
+        (3, 1),
+        (4, 2),
+        (5, 2),
+        (6, 3),
+        (12, 3),
+    ],
+)
+def test_parallel_width(live: int, expected: int) -> None:
+    """С 6 каналами снимаем три снимка SERP, не колотя каждый IP чаще прежнего."""
+    assert parallel_width(live) == expected
 
 
 @pytest.mark.parametrize(

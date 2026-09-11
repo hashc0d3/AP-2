@@ -28,6 +28,10 @@ _SECRET_ENV_KEYS = {
     "cookies_api_key": "COOKIES_API_KEY",
 }
 
+# Поля Settings держат первые три канала; остальные читаются из
+# PROXY_STRING_4 … PROXY_STRING_12, чтобы докупить прокси без правки кода.
+_MAX_PROXY_SLOTS = 12
+
 # Старое имя ключа -> актуальное поле, чтобы не ломать существующие config.toml.
 _KEY_ALIASES = {"pause_general": "retry_pause"}
 
@@ -86,7 +90,7 @@ class Settings:
     ip_change_wait: float = 25.0
 
     # ── Пул cookies ─────────────────────────────────────────────────────
-    cookie_pool_size: int = 16
+    cookie_pool_size: int = 24
     cookie_unblock_pause: int = 60
 
     # ── Веб-интерфейс ───────────────────────────────────────────────────
@@ -122,14 +126,17 @@ class Settings:
     def proxy_endpoints(self) -> tuple[tuple[str, str], ...]:
         """Пары (строка прокси, ссылка смены IP) для рабочего пула."""
         pairs: list[tuple[str, str]] = []
-        for proxy_string, change_url in (
-            (self.proxy_string, self.proxy_change_url),
-            (self.proxy_string_2, self.proxy_change_url_2),
-            (self.proxy_string_3, self.proxy_change_url_3),
-        ):
+
+        def add(proxy_string: str, change_url: str) -> None:
             text = proxy_string.strip()
             if text:
                 pairs.append((text, change_url.strip()))
+
+        add(self.proxy_string, self.proxy_change_url)
+        add(self.proxy_string_2, self.proxy_change_url_2)
+        add(self.proxy_string_3, self.proxy_change_url_3)
+        for n in range(4, _MAX_PROXY_SLOTS + 1):
+            add(os.environ.get(f"PROXY_STRING_{n}", ""), os.environ.get(f"PROXY_CHANGE_URL_{n}", ""))
         return tuple(pairs)
 
     def for_search(
@@ -187,6 +194,13 @@ def _unique(values: tuple[str, ...]) -> tuple[str, ...]:
         seen.add(key)
         out.append(text)
     return tuple(out)
+
+
+def _is_secret_toml_key(key: str) -> bool:
+    """Секреты не должны жить в config.toml — даже с номером слота прокси."""
+    if key in _SECRET_ENV_KEYS:
+        return True
+    return key.startswith("proxy_string") or key.startswith("proxy_change_url")
 
 
 def load_env() -> None:
@@ -255,11 +269,11 @@ def load_settings() -> Settings:
         key = _KEY_ALIASES.get(raw_key, raw_key)
         if key in _OBSOLETE_KEYS:
             continue
+        if _is_secret_toml_key(key):
+            logger.warning(f"config.toml: «{raw_key}» — секрет, задайте его в .env")
+            continue
         if key not in _FIELD_TYPES:
             logger.warning(f"config.toml: неизвестный ключ «{raw_key}» — пропущен")
-            continue
-        if key in _SECRET_ENV_KEYS:
-            logger.warning(f"config.toml: «{raw_key}» — секрет, задайте его в .env")
             continue
         try:
             values[key] = _coerce(key, raw_value)

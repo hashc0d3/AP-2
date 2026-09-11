@@ -26,7 +26,7 @@ def _label(proxy_string: str) -> str:
 class ProxyChannel:
     """Один мобильный прокси и состояние смены его IP."""
 
-    __slots__ = ("change_url", "changing", "leases", "proxy_string", "ready")
+    __slots__ = ("proxy_string", "change_url", "changing", "ready", "leases")
 
     def __init__(self, proxy_string: str, change_url: str) -> None:
         self.proxy_string = proxy_string
@@ -72,6 +72,12 @@ class ProxyPool:
     def size(self) -> int:
         with self._lock:
             return len(self._channels)
+
+    @property
+    def live_size(self) -> int:
+        """Сколько каналов сейчас принимают запросы, а не меняют IP."""
+        with self._lock:
+            return sum(1 for channel in self._channels if not channel.changing)
 
     def proxy_for(self, key: str) -> str:
         """Канал набора cookies: закреплённый, пока он жив, иначе новый.
