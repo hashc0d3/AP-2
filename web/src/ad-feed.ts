@@ -33,6 +33,8 @@ export type AdFeed = {
   purgeBlacklisted: () => void;
   /** Открыть поток событий и запустить запасной опрос. */
   start: () => void;
+  /** Сразу забрать ленту с сервера: клик по push или возврат на вкладку. */
+  pull: () => void;
 };
 
 export function createAdFeed(opts: {
@@ -130,18 +132,28 @@ export function createAdFeed(opts: {
     syncEmpty();
   };
 
+  const pull = (): void => {
+    void api
+      .ads()
+      .then((ads) => add(ads, false))
+      .catch(() => undefined);
+  };
+
   const start = (): void => {
     connect();
     window.setInterval(() => {
       if (!opts.isMonitoring()) return;
-      void api
-        .ads()
-        .then((ads) => add(ads, false))
-        .catch(() => undefined);
+      pull();
     }, POLL_INTERVAL_MS);
     window.setInterval(() => {
       opts.cards.refreshTimes();
     }, CLOCK_INTERVAL_MS);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") pull();
+    });
+    navigator.serviceWorker?.addEventListener("message", (event: MessageEvent<{ type?: string }>) => {
+      if (event.data?.type === "feed-pull") pull();
+    });
   };
 
   const connect = (): void => {
@@ -158,5 +170,5 @@ export function createAdFeed(opts: {
     events.onerror = () => opts.onReconnecting();
   };
 
-  return { add, clear, syncEmpty, purgeBlacklisted, start };
+  return { add, clear, syncEmpty, purgeBlacklisted, start, pull };
 }

@@ -30,6 +30,7 @@ self.addEventListener("notificationclick", (event) => {
       for (const client of clients) {
         if ("focus" in client) {
           if (client.url.includes(self.location.origin)) {
+            client.postMessage({ type: "feed-pull" });
             return client.focus();
           }
         }
