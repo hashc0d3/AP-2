@@ -74,7 +74,7 @@ class Settings:
     pause_between_pages: int = 0
 
     # ── Темп опроса ─────────────────────────────────────────────────────
-    poll_interval: float = 4.0
+    poll_interval: float = 3.0
     """Нижняя граница интервала между циклами."""
     poll_interval_max: float = 24.0
     """Верхняя граница: до неё замедляемся при серии отказов Avito."""

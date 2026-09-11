@@ -24,6 +24,26 @@ def poll_delay(poll_interval: float, per_cookie_interval: float, cookies: int) -
     return max(poll_interval, per_cookie_interval / max(1, cookies))
 
 
+def next_interval(
+    pacer_interval: float,
+    per_cookie_interval: float,
+    cookies: int,
+    *,
+    failed: bool,
+    throttled: bool,
+    retry_pause: float,
+) -> float:
+    """Целевой интервал после цикла.
+
+    ``retry_pause`` только если сорвалась сеть, а не 429/439: соседний
+    прокси уже работает, а одиночный бан по IP на долю отказов не влияет.
+    """
+    target = poll_delay(pacer_interval, per_cookie_interval, cookies)
+    if failed and not throttled:
+        return max(target, retry_pause)
+    return target
+
+
 class PollPacer:
     """Интервал опроса, который сам подстраивается под поведение Avito."""
 

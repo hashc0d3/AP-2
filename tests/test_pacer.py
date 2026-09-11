@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from avito_monitor.monitor.pacer import PollPacer, poll_delay
+from avito_monitor.monitor.pacer import PollPacer, next_interval, poll_delay
 
 
 @pytest.mark.parametrize(
@@ -21,6 +21,25 @@ def test_poll_delay(
     poll_interval: float, per_cookie_interval: float, cookies: int, expected: float
 ) -> None:
     assert poll_delay(poll_interval, per_cookie_interval, cookies) == expected
+
+
+def test_next_interval_keeps_pace_after_429() -> None:
+    """Одиночный 429 не должен включать retry_pause — соседний канал живой."""
+    assert (
+        next_interval(3, 12, 15, failed=True, throttled=True, retry_pause=12) == 3
+    )
+
+
+def test_next_interval_waits_after_network_drop() -> None:
+    assert (
+        next_interval(3, 12, 15, failed=True, throttled=False, retry_pause=12) == 12
+    )
+
+
+def test_next_interval_success_stays_at_poll() -> None:
+    assert (
+        next_interval(3, 12, 15, failed=False, throttled=False, retry_pause=12) == 3
+    )
 
 
 @pytest.fixture

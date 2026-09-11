@@ -19,6 +19,9 @@ Session = curl_requests.Session
 DEFAULT_IMPERSONATE = "chrome131_android"
 DEFAULT_ATTEMPTS = 2
 RETRY_PAUSE = 0.5
+CONNECT_TIMEOUT = 5.0
+"""Сколько ждать установку соединения. Мёртвый туннель отваливается быстро,
+а тело JSON может качаться до ``request_timeout``."""
 
 RATE_LIMITED = 429
 """Avito ограничил IP: cookies целы, нужен другой адрес."""
@@ -27,6 +30,19 @@ COOKIE_BLOCKED = (403, 439)
 """Набор cookies сгорел — его нужно заменить."""
 
 REJECTED_STATUSES = (*COOKIE_BLOCKED, RATE_LIMITED)
+
+
+def call_timeout(timeout: float) -> float | tuple[float, float]:
+    """Таймаут для curl: соединение рвём быстро, тело ждём до ``timeout``.
+
+    Один общий лимит в 5 с обрывает уже качающийся JSON (в логе
+    ``timed out … with 81001 bytes received``) и зря гоняет смену IP.
+    """
+    timeout = max(3.0, timeout)
+    connect = min(CONNECT_TIMEOUT, timeout)
+    if connect >= timeout:
+        return timeout
+    return (connect, timeout)
 
 
 def build_client(session: dict, proxy_string: str = "") -> Session:
@@ -71,7 +87,7 @@ def fetch_page(
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
-            response = client.get(url, timeout=timeout)
+            response = client.get(url, timeout=call_timeout(timeout))
             if response.status_code in REJECTED_STATUSES:
                 return response.status_code, None
             response.raise_for_status()

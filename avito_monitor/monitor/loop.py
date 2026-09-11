@@ -24,7 +24,7 @@ from avito_monitor.avito import items as items_mod
 from avito_monitor.avito.regions import region_timezone
 from avito_monitor.config import Settings, load_settings
 from avito_monitor.cookies.ring import CookieRing
-from avito_monitor.monitor.pacer import PollPacer, poll_delay
+from avito_monitor.monitor.pacer import PollPacer, next_interval
 from avito_monitor.monitor.seen import SeenStore
 from avito_monitor.net import client as net_client
 from avito_monitor.net.proxy import ensure_proxy_bypasses_vpn
@@ -278,9 +278,14 @@ def _monitor_search(settings: Settings, ring: CookieRing, seen: SeenStore, gener
         else:
             pacer.on_ok()
 
-        target = poll_delay(pacer.interval, runtime.per_cookie_interval, ring.size())
-        if failed:
-            target = max(target, runtime.retry_pause)
+        target = next_interval(
+            pacer.interval,
+            runtime.per_cookie_interval,
+            ring.size(),
+            failed=failed,
+            throttled=throttled,
+            retry_pause=runtime.retry_pause,
+        )
         wait = max(0.0, target - (time.monotonic() - started))
         logger.info(
             f"Цикл {time.monotonic() - started:.1f} с, пауза {wait:.1f} с, "
