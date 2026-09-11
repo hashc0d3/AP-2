@@ -12,13 +12,16 @@
 поиск», и останавливается, когда поиск сняли или заменили.
 
 При четырёх и больше живых прокси запрос идёт сразу по нескольким каналам:
-разные cookies видят разные снимки SERP, и уникальные id сливаются в один
-цикл. До трёх каналов опрос остаётся последовательным.
+разные cookies видят разные снимки SERP. Каждый успешный ответ сразу
+отбирается и уходит в ленту, не дожидаясь самого медленного канала;
+уникальные id соседей догоняют. До трёх каналов опрос остаётся
+последовательным.
 """
 
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from curl_cffi.requests.exceptions import RequestException
@@ -36,6 +39,8 @@ from avito_monitor.net.proxy import ensure_proxy_bypasses_vpn
 from avito_monitor.net.proxies import PROXY_POOL
 from avito_monitor.paths import ensure_runtime_dirs
 from avito_monitor.search_session import SESSION
+
+ItemsCallback = Callable[[list[dict]], None]
 
 
 @dataclass(slots=True)
@@ -152,8 +157,17 @@ def _apply_probe_failure(ring: CookieRing, probe: _Probe) -> None:
         PROXY_POOL.ban(probe.proxy, "429: бан по IP", wait=False)
 
 
-def _fetch_items_parallel(settings: Settings, ring: CookieRing, width: int) -> CycleResult:
-    """Снять несколько каналов сразу и слить уникальные объявления."""
+def _fetch_items_parallel(
+    settings: Settings,
+    ring: CookieRing,
+    width: int,
+    on_items: ItemsCallback | None = None,
+) -> CycleResult:
+    """Снять несколько каналов сразу и слить уникальные объявления.
+
+    Успешный канал отдаёт выдачу в ``on_items`` сразу, не дожидаясь
+    остальных: кольцо и пул по-прежнему трогает только этот поток.
+    """
     batch = ring.next_many(width)
     if not batch:
         slot, client = _recover_empty_pool(settings, ring, "Нет рабочих cookies — докупаю")
@@ -169,7 +183,10 @@ def _fetch_items_parallel(settings: Settings, ring: CookieRing, width: int) -> C
     logger.info(f"Цикл параллельно ×{len(batch)}: {labels}")
     logger.info("Запрашиваю выдачу, presentationType=serp, sort=date")
 
-    probes: list[_Probe | None] = [None] * len(batch)
+    groups: list[list[dict]] = []
+    throttled = False
+    last_status = 0
+    any_ok = False
     with ThreadPoolExecutor(max_workers=len(batch), thread_name_prefix="avito-fetch") as pool:
         futures = {
             pool.submit(
@@ -182,24 +199,19 @@ def _fetch_items_parallel(settings: Settings, ring: CookieRing, width: int) -> C
             for index, (slot, client) in enumerate(batch)
         }
         for future in as_completed(futures):
-            probes[futures[future]] = future.result()
-
-    groups: list[list[dict]] = []
-    throttled = False
-    last_status = 0
-    any_ok = False
-    for probe, (slot, _) in zip(probes, batch):
-        if probe is None:
-            continue
-        last_status = probe.status or last_status
-        if probe.failed:
-            throttled = throttled or probe.throttled
-            _apply_probe_failure(ring, probe)
-            logger.warning(f"id={slot.get('id')}: отказ status={probe.status or 'сеть'}")
-            continue
-        any_ok = True
-        groups.append(probe.items)
-        logger.info(f"id={slot.get('id')}: {len(probe.items)} объявлений")
+            probe = future.result()
+            slot, _ = batch[futures[future]]
+            last_status = probe.status or last_status
+            if probe.failed:
+                throttled = throttled or probe.throttled
+                _apply_probe_failure(ring, probe)
+                logger.warning(f"id={slot.get('id')}: отказ status={probe.status or 'сеть'}")
+                continue
+            any_ok = True
+            groups.append(probe.items)
+            logger.info(f"id={slot.get('id')}: {len(probe.items)} объявлений")
+            if on_items and probe.items:
+                on_items(probe.items)
 
     if not any_ok:
         return CycleResult(status=last_status, failed=True, throttled=throttled)
@@ -210,7 +222,11 @@ def _fetch_items_parallel(settings: Settings, ring: CookieRing, width: int) -> C
     return CycleResult(status=last_status, items=items, throttled=throttled)
 
 
-def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
+def fetch_items(
+    settings: Settings,
+    ring: CookieRing,
+    on_items: ItemsCallback | None = None,
+) -> CycleResult:
     """Забрать выдачу Avito и разобрать JSON как есть.
 
     Запрос как 6 сентября: ``presentationType=serp`` и ``sort=date``,
@@ -219,7 +235,7 @@ def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
     """
     width = parallel_width(PROXY_POOL.live_size)
     if width > 1:
-        return _fetch_items_parallel(settings, ring, width)
+        return _fetch_items_parallel(settings, ring, width, on_items=on_items)
 
     result = CycleResult()
     slot, client = ring.next()
@@ -300,7 +316,22 @@ def fetch_items(settings: Settings, ring: CookieRing) -> CycleResult:
     items = items_mod.extract_items(payload)
     logger.info(f"Получено из JSON: {len(items)} объявлений")
     result.items = items
+    if on_items and items:
+        on_items(items)
     return result
+
+
+def _log_selection(selected: list[dict], stats: filters.FilterStats, *, first_run: bool, immediate: bool) -> None:
+    """Строка отбора: сразу после канала или итог цикла."""
+    summary = stats.summary()
+    extra = f" ({summary})" if summary else ""
+    if immediate:
+        logger.info(f"В ленту сразу {len(selected)} объявлений{extra}")
+        return
+    if first_run:
+        logger.info(f"Старт: кладу в ленту {len(selected)} объявлений{extra}")
+        return
+    logger.info(f"Подходящих: {len(selected)}{extra}")
 
 
 def run_cycle(
@@ -310,36 +341,47 @@ def run_cycle(
     *,
     first_run: bool,
     started_at: float = 0.0,
+    on_selected: ItemsCallback | None = None,
 ) -> tuple[list[dict], bool, bool]:
     """Один цикл: опрос, фильтрация, отчёт в лог.
 
-    Возвращает ``(объявления для ленты, цикл провалился, Avito ограничивает)``.
+    ``on_selected`` вызывается по мере ответа канала, чтобы лента не ждала
+    самый медленный прокси. Возвращает ``(объявления для ленты, цикл
+    провалился, Avito ограничивает)``.
     """
-    result = fetch_items(settings, ring)
+    selected: list[dict] = []
+    last_stats = filters.FilterStats()
+
+    def consume(raw: list[dict]) -> None:
+        nonlocal last_stats
+        batch, stats = filters.select_new_ads(
+            raw, settings, seen.ids, first_run=first_run, started_at=started_at
+        )
+        seen.save()
+        last_stats = stats
+        if not batch:
+            return
+        selected.extend(batch)
+        if on_selected:
+            _log_selection(batch, stats, first_run=first_run, immediate=True)
+            on_selected(batch)
+
+    result = fetch_items(settings, ring, on_items=consume)
     if not result.items:
         if result.status:
             logger.error(f"Цикл без объявлений, status={result.status}")
-        return [], True, result.throttled
+        return selected, True, result.throttled
 
     logger.info(f"Получено объявлений: {len(result.items)}")
     json_ages = [age for age in (items_mod.age_seconds(item) for item in result.items) if age is not None]
     if json_ages:
         logger.info(f"В JSON свежее {min(json_ages)} сек, старше {max(json_ages)} сек")
-    selected, stats = filters.select_new_ads(
-        result.items, settings, seen.ids, first_run=first_run, started_at=started_at
-    )
-    seen.save()
-
-    summary = stats.summary()
-    if first_run:
-        extra = f" ({summary})" if summary else ""
-        logger.info(f"Старт: кладу в ленту {len(selected)} объявлений{extra}")
-        if stats.promotion_badge_ignored:
-            logger.info(f"API URL: {settings.api_url}")
-    else:
-        logger.info(f"Подходящих: {len(selected)}" + (f" ({summary})" if summary else ""))
-    if stats.company_hints:
-        logger.info("Пример «компания»: " + "; ".join(stats.company_hints))
+    if on_selected is None:
+        _log_selection(selected, last_stats, first_run=first_run, immediate=False)
+    if last_stats.promotion_badge_ignored and first_run:
+        logger.info(f"API URL: {settings.api_url}")
+    if last_stats.company_hints:
+        logger.info("Пример «компания»: " + "; ".join(last_stats.company_hints))
     if not selected:
         logger.info("Новых объявлений нет")
         return [], result.failed, result.throttled
@@ -402,15 +444,16 @@ def _monitor_search(settings: Settings, ring: CookieRing, seen: SeenStore, gener
         throttled = False
 
         try:
-            selected, failed, throttled = run_cycle(
+            _, failed, throttled = run_cycle(
                 runtime,
                 ring,
                 seen,
                 first_run=first_run,
                 started_at=float(search.get("started_at") or 0.0),
+                on_selected=lambda items: publish_ads(
+                    [items_mod.serialize_ad(item, tz_name=tz_name) for item in items]
+                ),
             )
-            if selected:
-                publish_ads([items_mod.serialize_ad(item, tz_name=tz_name) for item in selected])
             first_run = False
         except Exception as err:
             # Любая неожиданная ошибка не должна останавливать мониторинг.

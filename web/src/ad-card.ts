@@ -61,7 +61,18 @@ export function createAdCardRenderer(opts: {
     opts.feed.classList.toggle("no-images", hidden);
     opts.feed.querySelectorAll<HTMLElement>(".card").forEach((card) => {
       card.classList.toggle("card--no-media", hidden);
-      card.querySelector(".card-media")?.classList.toggle("hidden", hidden);
+      const media = card.querySelector<HTMLElement>(".card-media");
+      const img = card.querySelector<HTMLImageElement>(".card-media img");
+      if (hidden) {
+        // display:none картинку не отменяет: src уже ушёл на /img.
+        if (img) img.removeAttribute("src");
+        media?.classList.add("hidden");
+        return;
+      }
+      media?.classList.remove("hidden");
+      if (img && card.dataset.photo && !img.getAttribute("src")) {
+        img.src = imgSrc(card.dataset.photo);
+      }
     });
   };
 
@@ -73,10 +84,13 @@ function cardHtml(ad: Ad, view: { hideImages: boolean; timeZone: string }): stri
   const fav = isFavorite(String(ad.id));
   const favTitle = fav ? "Убрать из избранного" : "В избранное";
   const title = escapeHtml(ad.title || "");
+  const photo = ad.images?.[0] || "";
 
   return `<article class="card${fav ? " is-fav" : ""}${view.hideImages ? " card--no-media" : ""}" data-id="${escapeHtml(String(ad.id))}"${
     ad.ts ? ` data-ts="${ad.ts}"` : ""
-  }${ad.received_at ? ` data-received-at="${ad.received_at}"` : ""}${ad.seller ? ` data-seller="${escapeHtml(ad.seller)}"` : ""}">
+  }${ad.received_at ? ` data-received-at="${ad.received_at}"` : ""}${
+    photo ? ` data-photo="${escapeHtml(photo)}"` : ""
+  }${ad.seller ? ` data-seller="${escapeHtml(ad.seller)}"` : ""}">
       ${view.hideImages ? "" : mediaHtml(ad)}
       <div class="card-body">
         <div class="card-price-block">
