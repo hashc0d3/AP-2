@@ -29,8 +29,10 @@ UNBLOCK_TIMEOUT = 60.0
 CONVERT_TIMEOUT = 20.0
 BALANCE_TIMEOUT = 45.0
 
-# 410 на разблокировке значит «набор старше 12 часов и больше не оживёт».
+# 410 — набор старше 12 часов. 404 — сервис его уже забыл. Оба случая:
+# набор больше не оживёт, пул должен выкинуть его и докупить другой.
 GONE = 410
+MISSING = 404
 
 
 class SpfaError(RuntimeError):
@@ -117,15 +119,17 @@ def buy_cookies(api_key: str, proxy_string: str) -> dict[str, Any]:
 def unblock_cookies(cookie_id: Any, api_key: str, proxy_string: str) -> dict[str, Any]:
     """Попросить сервис переоформить набор cookies.
 
-    :raises SpfaCookieGone: набор устарел и восстановлению не подлежит.
+    :raises SpfaCookieGone: набор устарел (410) или сервис его уже не знает (404).
     """
     response = post(
         UNBLOCK_URL,
         {"id": cookie_id, "api_key": api_key, "proxy": proxy_string},
         UNBLOCK_TIMEOUT,
     )
-    if response.status_code == GONE:
-        raise SpfaCookieGone(f"Набор id={cookie_id} мёртв (410, старше 12 часов)")
+    if response.status_code in {GONE, MISSING}:
+        raise SpfaCookieGone(
+            f"Набор id={cookie_id} мёртв ({response.status_code}, сервис его не знает)"
+        )
     results = _payload(response).get("results") or {}
     if not isinstance(results, dict) or not results.get("cookies"):
         raise SpfaError(f"Сервис не вернул cookies для id={cookie_id}")

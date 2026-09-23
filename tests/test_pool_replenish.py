@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from avito_monitor import spfa
 from avito_monitor.cookies import pool
 
 
@@ -74,3 +75,27 @@ def test_wait_ready_cookie_buys_immediately(settings, monkeypatch) -> None:
     assert calls["n"] == 1
     assert chosen is not None
     assert chosen["id"] == "bought"
+
+
+def test_unblock_404_marks_dead_and_frees_slot(settings, monkeypatch) -> None:
+    """404 от SPFA — набор мёртв: иначе 15 призраков занимают пул и докупки нет."""
+    pool.save_slot(
+        {
+            "id": "gone-1",
+            "cookies": {"sessid": "x"},
+            "user_agent": "ua",
+            "status": pool.STATUS_BLOCKED,
+            "unblock_ok": False,
+        }
+    )
+
+    def fake_unblock(*_a, **_k):
+        raise spfa.SpfaCookieGone("404 Cookie не найден")
+
+    monkeypatch.setattr(spfa, "unblock_cookies", fake_unblock)
+    assert pool.unblock_one({"id": "gone-1"}, settings) is None
+    dead = pool.load_slot("gone-1")
+    assert dead is not None
+    assert dead["status"] == pool.STATUS_DEAD
+    assert len(pool.alive_slots()) == 0
+
