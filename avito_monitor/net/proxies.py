@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import threading
+import time
 
 from loguru import logger
 
@@ -26,7 +27,15 @@ def _label(proxy_string: str) -> str:
 class ProxyChannel:
     """Один мобильный прокси и состояние смены его IP."""
 
-    __slots__ = ("proxy_string", "change_url", "changing", "ready", "leases")
+    __slots__ = (
+        "proxy_string",
+        "change_url",
+        "changing",
+        "ready",
+        "leases",
+        "cooling_until",
+        "strikes",
+    )
 
     def __init__(self, proxy_string: str, change_url: str) -> None:
         self.proxy_string = proxy_string
@@ -37,6 +46,10 @@ class ProxyChannel:
         # Сколько наборов cookies закреплено за каналом — по этому числу
         # раскладываем нагрузку поровну.
         self.leases = 0
+        self.cooling_until = 0.0
+        """До этого момента (monotonic) канал не берём в опрос: недавний 429."""
+        self.strikes = 0
+        """Сколько 429 подряд на этом порту. После серии — меняем IP."""
 
     @property
     def label(self) -> str:
@@ -52,6 +65,10 @@ class ProxyPool:
         self._lock = threading.Lock()
         self.change_wait = 12.0
         """Сколько ждать подъёма туннеля после смены IP."""
+        self.ban_cooldown = 12.0
+        """После 429 с запасом каналов не крутим IP: соседние порты уже другие /21."""
+        self.ip_change_after_strikes = 2
+        """Смена IP, когда один порт поймал столько 429 подряд."""
 
     def configure(self, endpoints: tuple[tuple[str, str], ...]) -> None:
         channels = [
@@ -77,7 +94,8 @@ class ProxyPool:
     def live_size(self) -> int:
         """Сколько каналов сейчас принимают запросы, а не меняют IP."""
         with self._lock:
-            return sum(1 for channel in self._channels if not channel.changing)
+            self._expire_cooldowns()
+            return sum(1 for channel in self._channels if self._available(channel))
 
     def proxy_for(self, key: str) -> str:
         """Канал набора cookies: закреплённый, пока он жив, иначе новый.
@@ -86,8 +104,9 @@ class ProxyPool:
         запросы делятся между ними примерно поровну.
         """
         with self._lock:
+            self._expire_cooldowns()
             leased = self._leases.get(key)
-            if leased is not None and not leased.changing:
+            if leased is not None and self._available(leased):
                 return leased.proxy_string
             chosen = self._least_busy()
             if chosen is None:
@@ -95,6 +114,15 @@ class ProxyPool:
             if chosen is not leased:
                 self._lease(key, chosen)
             return chosen.proxy_string
+
+    def note_ok(self, proxy_string: str) -> None:
+        """Канал отдал JSON — серию 429 на нём сбрасываем."""
+        if not proxy_string:
+            return
+        with self._lock:
+            channel = self._channel(proxy_string)
+            if channel is not None:
+                channel.strikes = 0
 
     def release(self, key: str) -> None:
         """Набор ушёл из кольца — освободить его место на канале."""
@@ -106,17 +134,20 @@ class ProxyPool:
     def current_string(self) -> str:
         """Живой канал для разовых запросов вне кольца: покупка cookies, номер."""
         with self._lock:
+            self._expire_cooldowns()
             channel = self._least_busy()
             return channel.proxy_string if channel else ""
 
     def ban(self, proxy_string: str, reason: str, *, wait: bool = True) -> None:
-        """Канал поймал бан: сменить ему IP в фоне, наборы отдать соседям.
+        """Канал поймал бан: увести наборы на соседей.
 
-        :param proxy_string: канал, на котором пришёл отказ; пустая строка —
-            выбрать самый свободный.
-        :param wait: ждать новый IP, если работать больше не на чем.
+        Если рядом есть живой порт — не крутим IP сразу: у шести каналов
+        сосед уже другой SIM/``/21``, а смена на том же порту часто
+        возвращает тот же пул и на 5 с выключает канал. IP меняем, когда
+        запас кончился или порт словил серию 429.
         """
         with self._lock:
+            self._expire_cooldowns()
             channel = self._channel(proxy_string) or self._least_busy()
             if channel is None:
                 logger.warning(f"{reason}: прокси не настроены")
@@ -125,16 +156,35 @@ class ProxyPool:
             spare = [
                 other
                 for other in self._channels
-                if other is not channel and not other.changing
+                if other is not channel and self._available(other)
             ]
+            channel.strikes += 1
+            rotate_ip = not spare or channel.strikes >= self.ip_change_after_strikes
+
             if spare:
                 names = ", ".join(other.label for other in spare)
-                logger.warning(f"{reason}: {channel.label} меняет IP, наборы уходят на {names}")
+                if rotate_ip:
+                    logger.warning(
+                        f"{reason}: {channel.label} меняет IP после "
+                        f"{channel.strikes} отказов, наборы уходят на {names}"
+                    )
+                else:
+                    logger.warning(
+                        f"{reason}: {channel.label} пауза {self.ban_cooldown:.0f} с "
+                        f"без смены IP, наборы уходят на {names}"
+                    )
             elif len(self._channels) > 1:
                 logger.warning(f"{reason}: свободных каналов нет, жду новый IP на {channel.label}")
             else:
                 logger.warning(f"{reason}: один прокси ({channel.label}), меняю IP")
 
+            if not rotate_ip:
+                channel.cooling_until = time.monotonic() + self.ban_cooldown
+                self._resettle(channel, spare)
+                return
+
+            channel.strikes = 0
+            channel.cooling_until = 0.0
             starting = not channel.changing
             if starting:
                 channel.changing = True
@@ -158,11 +208,30 @@ class ProxyPool:
                 return channel
         return None
 
+    def _available(self, channel: ProxyChannel) -> bool:
+        """Канал принимает запросы: не меняет IP и не в паузе после 429."""
+        if channel.changing:
+            return False
+        if channel.cooling_until and time.monotonic() < channel.cooling_until:
+            return False
+        return True
+
+    def _expire_cooldowns(self) -> None:
+        """Вернуть в раскладку порты, у которых кончилась пауза после 429."""
+        now = time.monotonic()
+        revived = False
+        for channel in self._channels:
+            if channel.cooling_until and now >= channel.cooling_until:
+                channel.cooling_until = 0.0
+                revived = True
+        if revived:
+            self._rebalance()
+
     def _least_busy(self) -> ProxyChannel | None:
         """Самый свободный живой канал; если живых нет — самый свободный вообще."""
         if not self._channels:
             return None
-        live = [channel for channel in self._channels if not channel.changing]
+        live = [channel for channel in self._channels if self._available(channel)]
         return min(live or self._channels, key=lambda channel: channel.leases)
 
     def _lease(self, key: str, channel: ProxyChannel) -> None:
@@ -190,7 +259,7 @@ class ProxyPool:
         Раскладка детерминированная, поэтому набор возвращается на свой
         прежний канал и переиспользует уже открытое соединение.
         """
-        live = [channel for channel in self._channels if not channel.changing]
+        live = [channel for channel in self._channels if self._available(channel)]
         if len(live) < 2:
             return
         settled = sorted(key for key, held in self._leases.items() if held in live)
@@ -217,6 +286,7 @@ class ProxyPool:
             finally:
                 with self._lock:
                     channel.changing = False
+                    channel.strikes = 0
                     self._rebalance()
                 channel.ready.set()
                 logger.info(f"{channel.label} снова в работе, наборы разложены заново")

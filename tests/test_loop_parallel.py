@@ -47,6 +47,7 @@ def test_parallel_fetch_merges_unique_ids(settings: Settings, cookies_dir, monke
     runtime = settings.for_search(web_url="", api_url="https://avito.test/items")
 
     def fake_fetch(client, url, *, attempts=2, timeout=10.0):
+        assert timeout <= loop_mod.PARALLEL_PROBE_TIMEOUT
         proxies = client.proxies or {}
         proxy_url = str(proxies.get("https") or proxies.get("http") or "")
         port = int(proxy_url.rsplit(":", 1)[-1])

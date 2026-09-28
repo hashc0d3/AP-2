@@ -38,17 +38,22 @@ class FakeChange:
             time.sleep(0.01)
 
 
-def test_live_size_ignores_channel_that_changes_ip(monkeypatch) -> None:
+def test_live_size_ignores_cooling_channel(monkeypatch) -> None:
+    """Первый 429 при живом соседе — пауза без смены IP, канал выпадает из опроса."""
     change = FakeChange(monkeypatch)
     pool = ProxyPool()
+    pool.ban_cooldown = 0.05
     pool.configure((A, B))
     assert pool.live_size == 2
 
     pool.ban(A[0], "429")
-    assert change.started.wait(timeout=1.0)
+    assert change.calls == []
     assert pool.live_size == 1
-    change.complete(pool)
-    assert pool.live_size == 2
+
+    deadline = time.monotonic() + 1.0
+    while pool.live_size < 2:
+        assert time.monotonic() < deadline, "канал не вышел из паузы"
+        time.sleep(0.01)
 
 
 def test_cookies_are_split_between_channels(monkeypatch) -> None:
@@ -71,7 +76,7 @@ def test_cookie_keeps_its_channel(monkeypatch) -> None:
     assert pool.proxy_for("101") == pool.proxy_for("101") == A[0]
 
 
-def test_ban_moves_cookies_to_neighbor_and_changes_ip(monkeypatch) -> None:
+def test_first_ban_moves_cookies_without_ip_change(monkeypatch) -> None:
     change = FakeChange(monkeypatch)
     pool = ProxyPool()
     pool.configure((A, B))
@@ -79,15 +84,28 @@ def test_ban_moves_cookies_to_neighbor_and_changes_ip(monkeypatch) -> None:
 
     pool.ban(A[0], "429")
 
-    assert change.started.wait(timeout=1.0)
     assert pool.proxy_for("101") == B[0]
+    assert change.calls == []
+
+
+def test_second_ban_on_same_port_changes_ip(monkeypatch) -> None:
+    """Два 429 подряд на одном порту — сосед уже не спас, крутим SIM."""
+    change = FakeChange(monkeypatch)
+    pool = ProxyPool()
+    pool.configure((A, B))
+    pool.proxy_for("101")
+
+    pool.ban(A[0], "429")
+    pool.ban(A[0], "429 снова")
+
+    assert change.started.wait(timeout=1.0)
     assert change.calls == [("http://change-a", A[0], pool.change_wait)]
     change.complete(pool)
 
 
 def test_ban_leaves_the_healthy_channel_alone(monkeypatch) -> None:
     """Наборы соседа не должны терять соединение из-за чужого бана."""
-    change = FakeChange(monkeypatch)
+    FakeChange(monkeypatch)
     pool = ProxyPool()
     pool.configure((A, B))
     pool.proxy_for("101")
@@ -95,9 +113,7 @@ def test_ban_leaves_the_healthy_channel_alone(monkeypatch) -> None:
 
     pool.ban(A[0], "429")
 
-    assert change.started.wait(timeout=1.0)
     assert pool.proxy_for("102") == B[0]
-    change.complete(pool)
 
 
 def test_channels_rebalance_after_ip_change(monkeypatch) -> None:
@@ -109,6 +125,7 @@ def test_channels_rebalance_after_ip_change(monkeypatch) -> None:
         pool.proxy_for(key)
 
     pool.ban(A[0], "429")
+    pool.ban(A[0], "429 снова")
     assert change.started.wait(timeout=1.0)
     assert {pool.proxy_for(key) for key in ("101", "103")} == {B[0]}
 
@@ -133,7 +150,7 @@ def test_single_proxy_keeps_cookie_and_changes_own_ip(monkeypatch) -> None:
 
 
 def test_ban_waits_when_no_channel_is_free(monkeypatch) -> None:
-    """Оба канала меняют IP — работать не на чем, ждём и не долбим впустую."""
+    """Сосед уже в паузе — менять IP не на чем, ждём и не долбим впустую."""
     change = FakeChange(monkeypatch)
     pool = ProxyPool()
     pool.change_wait = 0.05
@@ -141,12 +158,14 @@ def test_ban_waits_when_no_channel_is_free(monkeypatch) -> None:
     pool.proxy_for("101")
     pool.proxy_for("102")
     pool.ban(A[0], "429")
-    assert change.started.wait(timeout=1.0)
+    assert change.calls == []
+    assert pool.live_size == 1
 
     started = time.monotonic()
     pool.ban(B[0], "429")
     waited = time.monotonic() - started
 
+    assert change.started.wait(timeout=1.0)
     assert pool.change_wait <= waited <= pool.change_wait + 1.5
     change.complete(pool)
 

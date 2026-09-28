@@ -42,6 +42,9 @@ from avito_monitor.search_session import SESSION
 
 ItemsCallback = Callable[[list[dict]], None]
 
+PARALLEL_PROBE_TIMEOUT = 5.0
+"""В параллели не ждём полный ``request_timeout``: лента уже ушла с быстрого канала, а висящий туннель держал следующий цикл 12+ с."""
+
 
 @dataclass(slots=True)
 class CycleResult:
@@ -111,11 +114,18 @@ def _unique_items(groups: list[list[dict]]) -> list[dict]:
     return merged
 
 
-def _probe_listing(settings: Settings, client: object, proxy: str, cookie_id: object) -> _Probe:
+def _probe_listing(
+    settings: Settings,
+    client: object,
+    proxy: str,
+    cookie_id: object,
+    timeout: float | None = None,
+) -> _Probe:
     """Один запрос выдачи без пересадки: сбой разберёт вызывающий поток."""
     probe = _Probe(cookie_id=cookie_id, proxy=proxy)
+    limit = settings.request_timeout if timeout is None else timeout
     try:
-        status, payload = _fetch_page(client, settings.api_url, settings.request_timeout)
+        status, payload = _fetch_page(client, settings.api_url, limit)
     except RequestException:
         probe.failed = True
         probe.dropped = True
@@ -187,6 +197,7 @@ def _fetch_items_parallel(
     throttled = False
     last_status = 0
     any_ok = False
+    probe_timeout = min(settings.request_timeout, PARALLEL_PROBE_TIMEOUT)
     with ThreadPoolExecutor(max_workers=len(batch), thread_name_prefix="avito-fetch") as pool:
         futures = {
             pool.submit(
@@ -195,6 +206,7 @@ def _fetch_items_parallel(
                 client,
                 ring.proxy_of(slot),
                 slot.get("id"),
+                probe_timeout,
             ): index
             for index, (slot, client) in enumerate(batch)
         }
@@ -208,6 +220,7 @@ def _fetch_items_parallel(
                 logger.warning(f"id={slot.get('id')}: отказ status={probe.status or 'сеть'}")
                 continue
             any_ok = True
+            PROXY_POOL.note_ok(probe.proxy)
             groups.append(probe.items)
             logger.info(f"id={slot.get('id')}: {len(probe.items)} объявлений")
             if on_items and probe.items:
@@ -316,6 +329,7 @@ def fetch_items(
     items = items_mod.extract_items(payload)
     logger.info(f"Получено из JSON: {len(items)} объявлений")
     result.items = items
+    PROXY_POOL.note_ok(ring.proxy_of(slot))
     if on_items and items:
         on_items(items)
     return result
@@ -463,7 +477,9 @@ def _monitor_search(settings: Settings, ring: CookieRing, seen: SeenStore, gener
             logger.error(f"Ошибка цикла: {err}")
             ring.reset_clients()
 
-        if failed or throttled:
+        # Смешанный цикл (JSON с одного канала, 429 с другого) — успех:
+        # забаненный IP уже ушёл в паузу, темп из‑за соседа не поднимаем.
+        if failed:
             pacer.on_throttle()
         else:
             pacer.on_ok()
