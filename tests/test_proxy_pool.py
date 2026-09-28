@@ -202,3 +202,16 @@ def test_ip_prefix21_groups_neighbours() -> None:
     assert ip_prefix21("bad") == ""
     assert ip_prefix21("") == ""
     assert ip_prefix21(None) == ""
+
+
+def test_note_hang_rotates_only_after_streak(monkeypatch) -> None:
+    FakeChange(monkeypatch)
+    pool = ProxyPool()
+    pool.configure((A, B))
+
+    assert pool.note_hang(A[0]) is False
+    assert pool.note_hang(A[0]) is False
+    assert pool.note_hang(A[0]) is True
+
+    pool.clear_hangs(A[0])
+    assert pool.note_hang(A[0]) is False

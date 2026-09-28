@@ -99,6 +99,24 @@ def test_next_many_picks_distinct_proxies(ring: CookieRing, write_slot) -> None:
     assert len(ports) == 2
 
 
+def test_next_many_skips_already_used_proxies(ring: CookieRing, write_slot) -> None:
+    from avito_monitor.net.proxies import PROXY_POOL
+
+    PROXY_POOL.configure(
+        (("u:p@mproxy.site:20085", "http://change-a"), ("u:p@mproxy.site:10341", "http://change-b"))
+    )
+    for cookie_id in ("201", "202", "203", "204"):
+        write_slot(_slot(cookie_id))
+    ring.refresh()
+
+    first = ring.next_many(1)
+    skip = {ring.proxy_of(first[0][0])}
+    second = ring.next_many(1, skip_proxies=skip)
+
+    assert second
+    assert ring.proxy_of(second[0][0]) not in skip
+
+
 def test_client_is_rebuilt_when_its_channel_is_banned(
     ring: CookieRing, write_slot, monkeypatch: pytest.MonkeyPatch
 ) -> None:

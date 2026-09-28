@@ -26,7 +26,7 @@ def _label(proxy_string: str) -> str:
 class ProxyChannel:
     """Один мобильный прокси и состояние смены его IP."""
 
-    __slots__ = ("proxy_string", "change_url", "changing", "ready", "leases", "last_ip")
+    __slots__ = ("proxy_string", "change_url", "changing", "ready", "leases", "last_ip", "hangs")
 
     def __init__(self, proxy_string: str, change_url: str) -> None:
         self.proxy_string = proxy_string
@@ -39,6 +39,8 @@ class ProxyChannel:
         self.leases = 0
         self.last_ip = ""
         """Последний известный выходной адрес — для лога /21 после 429."""
+        self.hangs = 0
+        """Подряд таймаутов: меняем IP только когда туннель реально молчит."""
 
     @property
     def label(self) -> str:
@@ -47,6 +49,9 @@ class ProxyChannel:
 
 class ProxyPool:
     """Все настроенные прокси и раскладка наборов cookies по ним."""
+
+    TIMEOUT_BAN_STREAK = 3
+    """Столько таймаутов подряд — туннель мёртв, а не просто медленный Avito."""
 
     def __init__(self) -> None:
         self._channels: list[ProxyChannel] = []
@@ -80,6 +85,26 @@ class ProxyPool:
         """Сколько каналов сейчас принимают запросы, а не меняют IP."""
         with self._lock:
             return sum(1 for channel in self._channels if not channel.changing)
+
+    def note_hang(self, proxy_string: str) -> bool:
+        """Таймаут на канале. ``True`` — пора менять IP, не с первого же зависания."""
+        with self._lock:
+            channel = self._channel(proxy_string)
+            if channel is None:
+                return False
+            channel.hangs += 1
+            logger.warning(
+                f"{channel.label}: туннель не ответил "
+                f"({channel.hangs}/{self.TIMEOUT_BAN_STREAK})"
+            )
+            return channel.hangs >= self.TIMEOUT_BAN_STREAK
+
+    def clear_hangs(self, proxy_string: str) -> None:
+        """Канал снова отдал ответ — счётчик зависаний сбрасываем."""
+        with self._lock:
+            channel = self._channel(proxy_string)
+            if channel is not None:
+                channel.hangs = 0
 
     def proxy_for(self, key: str) -> str:
         """Канал набора cookies: закреплённый, пока он жив, иначе новый.
@@ -144,6 +169,7 @@ class ProxyPool:
             starting = not channel.changing
             if starting:
                 channel.changing = True
+                channel.hangs = 0
                 channel.ready.clear()
             self._resettle(channel, spare)
             waiting = channel if not spare and len(self._channels) > 1 else None

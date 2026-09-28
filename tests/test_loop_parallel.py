@@ -60,7 +60,7 @@ def test_parallel_fetch_merges_unique_ids(settings: Settings, cookies_dir, monke
 
     assert not result.failed
     assert 1 in ids
-    assert len(ids) == 4
+    assert len(ids) == 6
 
 
 def test_parallel_fetch_keeps_good_channels_after_429(
@@ -154,3 +154,48 @@ def test_run_cycle_publishes_each_channel_without_duplicates(
     assert set(flat) == {item["id"] for item in selected}
     assert 1 in flat
     assert 2 in flat
+
+
+def test_parallel_second_wave_after_all_429(settings: Settings, cookies_dir, monkeypatch) -> None:
+    """Первая пятёрка 429 — запасной канал снимает выдачу в том же цикле."""
+    monkeypatch.setattr("avito_monitor.net.proxies.change_ip", lambda *a, **k: None)
+    ring = _six_proxies_and_cookies(cookies_dir, settings)
+    runtime = settings.for_search(web_url="", api_url="https://avito.test/items")
+    calls = {"n": 0}
+
+    def fake_fetch(client, url, *, attempts=2, timeout=10.0):
+        calls["n"] += 1
+        if calls["n"] <= 5:
+            return 429, None
+        return 200, {"items": [{"id": 55}]}
+
+    monkeypatch.setattr(loop_mod.net_client, "fetch_page", fake_fetch)
+
+    result = loop_mod.fetch_items(runtime, ring)
+
+    assert calls["n"] >= 6
+    assert result.throttled
+    assert not result.failed
+    assert {item["id"] for item in result.items} == {55}
+
+
+def test_parallel_timeout_does_not_rotate_ip(settings: Settings, cookies_dir, monkeypatch) -> None:
+    """Первый таймаут — медленный Avito, не мёртвый туннель: IP не крутим."""
+    from curl_cffi.requests.exceptions import RequestException
+
+    rotated: list[int] = []
+    monkeypatch.setattr(
+        "avito_monitor.net.proxies.change_ip", lambda *a, **k: rotated.append(1) or ""
+    )
+    ring = _six_proxies_and_cookies(cookies_dir, settings)
+    runtime = settings.for_search(web_url="", api_url="https://avito.test/items")
+
+    def fake_fetch(client, url, *, attempts=2, timeout=10.0):
+        raise RequestException("HTTPSConnectionPool: Read timed out.")
+
+    monkeypatch.setattr(loop_mod.net_client, "fetch_page", fake_fetch)
+
+    result = loop_mod.fetch_items(runtime, ring)
+
+    assert result.failed
+    assert rotated == []

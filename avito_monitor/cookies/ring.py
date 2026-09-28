@@ -153,22 +153,31 @@ class CookieRing:
         slot = self._slots[key]
         return slot, self.client_for(slot)
 
-    def next_many(self, n: int) -> list[tuple[dict, Session]]:
+    def next_many(
+        self, n: int, *, skip_proxies: set[str] | frozenset[str] | None = None
+    ) -> list[tuple[dict, Session]]:
         """До ``n`` наборов на разных каналах — для параллельного опроса.
 
-        Наборы, чей прокси уже попал в пачку, пропускаются: их снимок SERP
-        в этом цикле не нужен, а лимит Avito на IP не сжигается дважды.
+        Наборы, чей прокси уже попал в пачку или в ``skip_proxies``,
+        пропускаются: их снимок SERP в этом цикле не нужен, а лимит Avito
+        на IP не сжигается дважды.
         """
         width = max(1, n)
+        forbidden = set(skip_proxies or ())
         first_slot, first_client = self.next()
         if first_slot is None or first_client is None:
             return []
-        batch: list[tuple[dict, Session]] = [(first_slot, first_client)]
-        if width == 1:
-            return batch
 
+        batch: list[tuple[dict, Session]] = []
         seen_keys = {str(first_slot.get("id"))}
-        seen_proxies = {self.proxy_of(first_slot)}
+        seen_proxies: set[str] = set()
+        first_proxy = self.proxy_of(first_slot)
+        if first_proxy not in forbidden:
+            seen_proxies.add(first_proxy)
+            batch.append((first_slot, first_client))
+            if width == 1:
+                return batch
+
         scanned = 1
         total = len(self._order)
         while len(batch) < width and scanned < total:
@@ -181,7 +190,7 @@ class CookieRing:
                 break
             seen_keys.add(key)
             proxy = self.proxy_of(slot)
-            if proxy in seen_proxies:
+            if proxy in seen_proxies or proxy in forbidden:
                 continue
             seen_proxies.add(proxy)
             batch.append((slot, client))

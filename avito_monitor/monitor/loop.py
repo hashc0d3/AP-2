@@ -11,10 +11,11 @@
 Цикл не запускается сам: он ждёт, пока в веб-интерфейсе нажмут «Начать
 поиск», и останавливается, когда поиск сняли или заменили.
 
-При четырёх и больше живых прокси запрос идёт сразу по нескольким каналам:
+При трёх и больше живых прокси запрос идёт сразу по нескольким каналам:
 разные cookies видят разные снимки SERP. Каждый успешный ответ сразу
 отбирается и уходит в ленту, не дожидаясь самого медленного канала;
-уникальные id соседей догоняют. До трёх каналов опрос остаётся
+уникальные id соседей догоняют. Если вся волна без JSON — в том же цикле
+снимаем оставшиеся живые каналы. До трёх каналов опрос остаётся
 последовательным.
 """
 
@@ -42,8 +43,14 @@ from avito_monitor.search_session import SESSION
 
 ItemsCallback = Callable[[list[dict]], None]
 
-PARALLEL_PROBE_TIMEOUT = 5.0
+PARALLEL_PROBE_TIMEOUT = 3.0
 """В параллели не ждём полный ``request_timeout``: лента уже ушла с быстрого канала, а висящий туннель держал следующий цикл 12+ с."""
+
+
+def _is_timeout(err: BaseException) -> bool:
+    """Таймаут curl/прокси, а не обрыв TCP."""
+    text = f"{type(err).__name__} {err}".lower()
+    return "timeout" in text or "timed out" in text
 
 
 @dataclass(slots=True)
@@ -70,6 +77,7 @@ class _Probe:
     proxy: str = ""
     cookie_blocked: bool = False
     dropped: bool = False
+    timed_out: bool = False
     antibot: bool = False
 
 
@@ -126,9 +134,12 @@ def _probe_listing(
     limit = settings.request_timeout if timeout is None else timeout
     try:
         status, payload = _fetch_page(client, settings.api_url, limit)
-    except RequestException:
+    except RequestException as err:
         probe.failed = True
-        probe.dropped = True
+        if _is_timeout(err):
+            probe.timed_out = True
+        else:
+            probe.dropped = True
         return probe
 
     probe.status = status
@@ -157,6 +168,10 @@ def _apply_probe_failure(ring: CookieRing, probe: _Probe) -> None:
         ring.burn(probe.cookie_id)
         logger.warning(f"{probe.status}: cookie id={probe.cookie_id} сгорел, IP не меняю")
         return
+    if probe.timed_out:
+        if PROXY_POOL.note_hang(probe.proxy):
+            PROXY_POOL.ban(probe.proxy, "Прокси не отвечает слишком долго", wait=False)
+        return
     if probe.dropped:
         PROXY_POOL.ban(probe.proxy, "Прокси сбросил соединение", wait=False)
         return
@@ -167,37 +182,18 @@ def _apply_probe_failure(ring: CookieRing, probe: _Probe) -> None:
         PROXY_POOL.ban(probe.proxy, "429: бан по IP", wait=False)
 
 
-def _fetch_items_parallel(
+def _dispatch_probes(
     settings: Settings,
     ring: CookieRing,
-    width: int,
-    on_items: ItemsCallback | None = None,
-) -> CycleResult:
-    """Снять несколько каналов сразу и слить уникальные объявления.
-
-    Успешный канал отдаёт выдачу в ``on_items`` сразу, не дожидаясь
-    остальных: кольцо и пул по-прежнему трогает только этот поток.
-    """
-    batch = ring.next_many(width)
-    if not batch:
-        slot, client = _recover_empty_pool(settings, ring, "Нет рабочих cookies — докупаю")
-        if slot is None or client is None:
-            logger.error("Нет готового cookie — не бью Avito заблокированным набором")
-            return CycleResult(failed=True)
-        batch = [(slot, client)]
-
-    labels = ", ".join(
-        f"id={slot.get('id')} через {ring.proxy_of(slot).rsplit('@', 1)[-1] or 'без прокси'}"
-        for slot, _ in batch
-    )
-    logger.info(f"Цикл параллельно ×{len(batch)}: {labels}")
-    logger.info("Запрашиваю выдачу, presentationType=serp, sort=date")
-
+    batch: list[tuple[dict, object]],
+    probe_timeout: float,
+    on_items: ItemsCallback | None,
+) -> tuple[list[list[dict]], int, bool, bool]:
+    """Снять одну волну каналов. Успех сразу уходит в ``on_items``."""
     groups: list[list[dict]] = []
-    throttled = False
     last_status = 0
+    throttled = False
     any_ok = False
-    probe_timeout = min(settings.request_timeout, PARALLEL_PROBE_TIMEOUT)
     with ThreadPoolExecutor(max_workers=len(batch), thread_name_prefix="avito-fetch") as pool:
         futures = {
             pool.submit(
@@ -219,11 +215,67 @@ def _fetch_items_parallel(
                 _apply_probe_failure(ring, probe)
                 logger.warning(f"id={slot.get('id')}: отказ status={probe.status or 'сеть'}")
                 continue
+            PROXY_POOL.clear_hangs(probe.proxy)
             any_ok = True
             groups.append(probe.items)
             logger.info(f"id={slot.get('id')}: {len(probe.items)} объявлений")
             if on_items and probe.items:
                 on_items(probe.items)
+    return groups, last_status, throttled, any_ok
+
+
+def _fetch_items_parallel(
+    settings: Settings,
+    ring: CookieRing,
+    width: int,
+    on_items: ItemsCallback | None = None,
+) -> CycleResult:
+    """Снять несколько каналов сразу и слить уникальные объявления.
+
+    Успешный канал отдаёт выдачу в ``on_items`` сразу, не дожидаясь
+    остальных: кольцо и пул по-прежнему трогает только этот поток.
+    Если вся первая волна без JSON — в том же цикле снимаем оставшиеся
+    живые каналы, не тратя ``poll_interval``.
+    """
+    probe_timeout = min(settings.request_timeout, PARALLEL_PROBE_TIMEOUT)
+    used_proxies: set[str] = set()
+    groups: list[list[dict]] = []
+    throttled = False
+    last_status = 0
+    any_ok = False
+
+    for wave in range(2):
+        if wave == 1:
+            if any_ok or PROXY_POOL.live_size < 1:
+                break
+            width = max(1, PROXY_POOL.live_size)
+            logger.info("Первая волна без JSON — сразу добираю живые каналы")
+        batch = ring.next_many(width, skip_proxies=used_proxies)
+        if not batch:
+            if wave == 0:
+                slot, client = _recover_empty_pool(settings, ring, "Нет рабочих cookies — докупаю")
+                if slot is None or client is None:
+                    logger.error("Нет готового cookie — не бью Avito заблокированным набором")
+                    return CycleResult(failed=True)
+                batch = [(slot, client)]
+            else:
+                break
+        for slot, _ in batch:
+            used_proxies.add(ring.proxy_of(slot))
+        labels = ", ".join(
+            f"id={slot.get('id')} через {ring.proxy_of(slot).rsplit('@', 1)[-1] or 'без прокси'}"
+            for slot, _ in batch
+        )
+        logger.info(f"Цикл параллельно ×{len(batch)}: {labels}")
+        if wave == 0:
+            logger.info("Запрашиваю выдачу, presentationType=serp, sort=date")
+        wave_groups, status, wave_throttled, wave_ok = _dispatch_probes(
+            settings, ring, batch, probe_timeout, on_items
+        )
+        last_status = status or last_status
+        throttled = throttled or wave_throttled
+        groups.extend(wave_groups)
+        any_ok = any_ok or wave_ok
 
     if not any_ok:
         return CycleResult(status=last_status, failed=True, throttled=throttled)
@@ -243,7 +295,7 @@ def fetch_items(
 
     Запрос как 6 сентября: ``presentationType=serp`` и ``sort=date``,
     без ``p=1`` / ``p=2`` и без принудительного ``s=104``.
-    При четырёх и больше живых каналах опрос идёт сразу по нескольким.
+    При трёх и больше живых каналах опрос идёт сразу по нескольким.
     """
     width = parallel_width(PROXY_POOL.live_size)
     if width > 1:
@@ -260,6 +312,11 @@ def fetch_items(
     proxy = ring.proxy_of(slot).rsplit("@", 1)[-1] or "без прокси"
     logger.info(f"Цикл на cookie id={slot.get('id')} [{ring.position()}] через {proxy}")
     rotated = False
+    page_timeout = (
+        min(settings.request_timeout, PARALLEL_PROBE_TIMEOUT)
+        if PROXY_POOL.size >= 2
+        else settings.request_timeout
+    )
 
     def rotate(reason: str) -> bool:
         """Увести набор с забаненного канала; тот меняет IP в фоне."""
@@ -276,11 +333,15 @@ def fetch_items(
     logger.info("Запрашиваю выдачу, presentationType=serp, sort=date")
     status, payload = 0, None
     try:
-        status, payload = _fetch_page(client, url, settings.request_timeout)
-    except RequestException:
+        status, payload = _fetch_page(client, url, page_timeout)
+    except RequestException as err:
+        hung = _is_timeout(err) and not PROXY_POOL.note_hang(ring.proxy_of(slot))
+        if hung:
+            logger.warning("Прокси не ответил вовремя, IP не меняю")
+            return CycleResult(failed=True)
         if rotate("Прокси сбросил соединение, переключаюсь"):
             try:
-                status, payload = _fetch_page(client, url, settings.request_timeout)
+                status, payload = _fetch_page(client, url, page_timeout)
             except RequestException:
                 logger.warning("Соседний прокси тоже сбросил соединение — отдаю цикл")
                 return CycleResult(failed=True)
@@ -294,7 +355,7 @@ def fetch_items(
             return CycleResult(status=status, failed=True, throttled=True)
         if not rotate("429: бан по IP, переключаюсь на соседний прокси"):
             return CycleResult(status=status, failed=True, throttled=True)
-        status, payload = _fetch_page(client, url, settings.request_timeout)
+        status, payload = _fetch_page(client, url, page_timeout)
         if status == net_client.RATE_LIMITED:
             logger.warning("429 и на соседнем прокси — меняю его IP и отдаю цикл")
             PROXY_POOL.ban(ring.proxy_of(slot), "429 на соседнем канале", wait=False)
@@ -312,13 +373,13 @@ def fetch_items(
             logger.error("Пул не дал готовый набор после блокировки")
             return CycleResult(status=status, failed=True, throttled=True)
         logger.info(f"Продолжаю на cookie id={slot.get('id')}")
-        status, payload = _fetch_page(client, url, settings.request_timeout)
+        status, payload = _fetch_page(client, url, page_timeout)
 
     if not payload and status == 200:
         result.throttled = True
         if not rotate("200 без JSON — антибот вместо API, переключаюсь"):
             return CycleResult(status=status, failed=True, throttled=True)
-        status, payload = _fetch_page(client, url, settings.request_timeout)
+        status, payload = _fetch_page(client, url, page_timeout)
 
     result.status = status
     if not payload:
@@ -328,6 +389,7 @@ def fetch_items(
     items = items_mod.extract_items(payload)
     logger.info(f"Получено из JSON: {len(items)} объявлений")
     result.items = items
+    PROXY_POOL.clear_hangs(ring.proxy_of(slot))
     if on_items and items:
         on_items(items)
     return result

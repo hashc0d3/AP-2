@@ -15,13 +15,13 @@ from avito_monitor.monitor.pacer import PollPacer, next_interval, parallel_width
         (2, 1),
         (3, 2),
         (4, 3),
-        (5, 3),
-        (6, 3),
-        (12, 3),
+        (5, 4),
+        (6, 5),
+        (12, 11),
     ],
 )
 def test_parallel_width(live: int, expected: int) -> None:
-    """Пока живых трое и больше — снимаем до трёх снимков и оставляем один запасной."""
+    """Живых трое и больше — все кроме одного запасного, без потолка в три."""
     assert parallel_width(live) == expected
 
 
