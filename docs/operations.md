@@ -100,10 +100,13 @@ python -m avito_monitor.tools.bench_speed --api 5
 
 ```
 poll_interval = 3
-request_timeout = 12
+poll_interval_max = 8
+request_timeout = 5
 cookie_pool_size = 24
 ```
 
+`poll_interval_max = 3` выключает пейсер: после серии `429` темп должен
+чуть отойти, иначе живые каналы продолжают бить Avito каждые 3 с.
 `request_timeout` — общее время запроса. Значение выше 12 с обрезается:
 иначе curl складывает соединение и тело (в логе 25 с на 130 КБ без JSON).
 После выкладки: `docker compose up -d --build`.

@@ -4,14 +4,17 @@
 своим прокси, поэтому его соединение (keep-alive) живёт между циклами, а
 каждый IP получает лишь свою долю запросов и реже ловит 429.
 
-Забаненный канал уходит менять адрес в фоне, его наборы на это время
-переезжают к соседу — опрос не останавливается. Ждём новый IP, только когда
-свободных каналов не осталось.
+После 429 канал молчит, не меняя SIM: смена IP на том же порту часто
+возвращает ту же ``/21`` и на 10 с выключает канал, а сосед уже другой
+оператор. IP крутим, когда запас кончился, порт словил серию 429 или
+туннель реально мёртв. Ждём новый адрес, только если свободных каналов
+не осталось.
 """
 
 from __future__ import annotations
 
 import threading
+import time
 
 from loguru import logger
 
@@ -26,7 +29,17 @@ def _label(proxy_string: str) -> str:
 class ProxyChannel:
     """Один мобильный прокси и состояние смены его IP."""
 
-    __slots__ = ("proxy_string", "change_url", "changing", "ready", "leases", "last_ip", "hangs")
+    __slots__ = (
+        "proxy_string",
+        "change_url",
+        "changing",
+        "ready",
+        "leases",
+        "last_ip",
+        "hangs",
+        "cooling_until",
+        "strikes",
+    )
 
     def __init__(self, proxy_string: str, change_url: str) -> None:
         self.proxy_string = proxy_string
@@ -41,6 +54,10 @@ class ProxyChannel:
         """Последний известный выходной адрес — для лога /21 после 429."""
         self.hangs = 0
         """Подряд таймаутов: меняем IP только когда туннель реально молчит."""
+        self.cooling_until = 0.0
+        """До этого момента (monotonic) канал не берём в опрос: недавний 429."""
+        self.strikes = 0
+        """Сколько 429 подряд на этом порту. После серии — меняем IP."""
 
     @property
     def label(self) -> str:
@@ -59,6 +76,10 @@ class ProxyPool:
         self._lock = threading.Lock()
         self.change_wait = 12.0
         """Сколько ждать подъёма туннеля после смены IP."""
+        self.ban_cooldown = 20.0
+        """После 429 с запасом каналов не крутим IP: соседние порты уже другие /21."""
+        self.ip_change_after_strikes = 3
+        """Смена IP, когда один порт поймал столько 429 подряд."""
 
     def configure(self, endpoints: tuple[tuple[str, str], ...]) -> None:
         channels = [
@@ -82,9 +103,10 @@ class ProxyPool:
 
     @property
     def live_size(self) -> int:
-        """Сколько каналов сейчас принимают запросы, а не меняют IP."""
+        """Сколько каналов сейчас принимают запросы, а не меняют IP и не в паузе."""
         with self._lock:
-            return sum(1 for channel in self._channels if not channel.changing)
+            self._expire_cooldowns()
+            return sum(1 for channel in self._channels if self._available(channel))
 
     def note_hang(self, proxy_string: str) -> bool:
         """Таймаут на канале. ``True`` — пора менять IP, не с первого же зависания."""
@@ -98,6 +120,16 @@ class ProxyPool:
                 f"({channel.hangs}/{self.TIMEOUT_BAN_STREAK})"
             )
             return channel.hangs >= self.TIMEOUT_BAN_STREAK
+
+    def note_ok(self, proxy_string: str) -> None:
+        """Канал отдал ответ — сбрасываем серию 429 и таймаутов."""
+        if not proxy_string:
+            return
+        with self._lock:
+            channel = self._channel(proxy_string)
+            if channel is not None:
+                channel.strikes = 0
+                channel.hangs = 0
 
     def clear_hangs(self, proxy_string: str) -> None:
         """Канал снова отдал ответ — счётчик зависаний сбрасываем."""
@@ -113,8 +145,9 @@ class ProxyPool:
         запросы делятся между ними примерно поровну.
         """
         with self._lock:
+            self._expire_cooldowns()
             leased = self._leases.get(key)
-            if leased is not None and not leased.changing:
+            if leased is not None and self._available(leased):
                 return leased.proxy_string
             chosen = self._least_busy()
             if chosen is None:
@@ -133,17 +166,27 @@ class ProxyPool:
     def current_string(self) -> str:
         """Живой канал для разовых запросов вне кольца: покупка cookies, номер."""
         with self._lock:
+            self._expire_cooldowns()
             channel = self._least_busy()
             return channel.proxy_string if channel else ""
 
-    def ban(self, proxy_string: str, reason: str, *, wait: bool = True) -> None:
-        """Канал поймал бан: сменить ему IP в фоне, наборы отдать соседям.
+    def ban(
+        self,
+        proxy_string: str,
+        reason: str,
+        *,
+        wait: bool = True,
+        rotate_ip: bool = False,
+    ) -> None:
+        """Канал поймал бан: увести наборы на соседей.
 
-        :param proxy_string: канал, на котором пришёл отказ; пустая строка —
-            выбрать самый свободный.
-        :param wait: ждать новый IP, если работать больше не на чем.
+        ``429`` при живом соседе — пауза без смены IP: ``change_ip`` на том
+        же порту часто возвращает ту же ``/21`` и на 10 с глушит канал.
+        IP меняем, если запас кончился, порт словил серию 429, туннель
+        мёртв (``rotate_ip``) или прокси один.
         """
         with self._lock:
+            self._expire_cooldowns()
             channel = self._channel(proxy_string) or self._least_busy()
             if channel is None:
                 logger.warning(f"{reason}: прокси не настроены")
@@ -156,16 +199,41 @@ class ProxyPool:
             spare = [
                 other
                 for other in self._channels
-                if other is not channel and not other.changing
+                if other is not channel and self._available(other)
             ]
+            if not rotate_ip:
+                channel.strikes += 1
+            need_rotate = (
+                rotate_ip
+                or not spare
+                or channel.strikes >= self.ip_change_after_strikes
+            )
+
             if spare:
                 names = ", ".join(other.label for other in spare)
-                logger.warning(f"{reason}: {channel.label} меняет IP, наборы уходят на {names}")
+                if need_rotate:
+                    logger.warning(
+                        f"{reason}: {channel.label} меняет IP"
+                        f"{'' if rotate_ip else f' после {channel.strikes} отказов'}"
+                        f", наборы уходят на {names}"
+                    )
+                else:
+                    logger.warning(
+                        f"{reason}: {channel.label} пауза {self.ban_cooldown:.0f} с "
+                        f"без смены IP, наборы уходят на {names}"
+                    )
             elif len(self._channels) > 1:
                 logger.warning(f"{reason}: свободных каналов нет, жду новый IP на {channel.label}")
             else:
                 logger.warning(f"{reason}: один прокси ({channel.label}), меняю IP")
 
+            if not need_rotate:
+                channel.cooling_until = time.monotonic() + self.ban_cooldown
+                self._resettle(channel, spare)
+                return
+
+            channel.strikes = 0
+            channel.cooling_until = 0.0
             starting = not channel.changing
             if starting:
                 channel.changing = True
@@ -190,11 +258,30 @@ class ProxyPool:
                 return channel
         return None
 
+    def _available(self, channel: ProxyChannel) -> bool:
+        """Канал принимает запросы: не меняет IP и не в паузе после 429."""
+        if channel.changing:
+            return False
+        if channel.cooling_until and time.monotonic() < channel.cooling_until:
+            return False
+        return True
+
+    def _expire_cooldowns(self) -> None:
+        """Вернуть в раскладку порты, у которых кончилась пауза после 429."""
+        now = time.monotonic()
+        revived = False
+        for channel in self._channels:
+            if channel.cooling_until and now >= channel.cooling_until:
+                channel.cooling_until = 0.0
+                revived = True
+        if revived:
+            self._rebalance()
+
     def _least_busy(self) -> ProxyChannel | None:
         """Самый свободный живой канал; если живых нет — самый свободный вообще."""
         if not self._channels:
             return None
-        live = [channel for channel in self._channels if not channel.changing]
+        live = [channel for channel in self._channels if self._available(channel)]
         return min(live or self._channels, key=lambda channel: channel.leases)
 
     def _lease(self, key: str, channel: ProxyChannel) -> None:
@@ -222,7 +309,7 @@ class ProxyPool:
         Раскладка детерминированная, поэтому набор возвращается на свой
         прежний канал и переиспользует уже открытое соединение.
         """
-        live = [channel for channel in self._channels if not channel.changing]
+        live = [channel for channel in self._channels if self._available(channel)]
         if len(live) < 2:
             return
         settled = sorted(key for key, held in self._leases.items() if held in live)
@@ -254,6 +341,8 @@ class ProxyPool:
                     if new_ip:
                         channel.last_ip = new_ip
                     channel.changing = False
+                    channel.strikes = 0
+                    channel.hangs = 0
                     self._rebalance()
                 channel.ready.set()
                 logger.info(f"{channel.label} снова в работе, наборы разложены заново")

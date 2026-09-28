@@ -4,7 +4,7 @@
 
 1. взять следующий набор cookies из кольца — или несколько на разных каналах;
 2. запросить выдачу и разобрать JSON;
-3. при отказе Avito — увести набор на соседний прокси или взять другой набор;
+3. при `429` — увести набор на соседний канал без смены IP; при обрыве туннеля — сменить адрес;
 4. отфильтровать выдачу и отдать новое в веб-ленту;
 5. выдержать паузу, размер которой определяет :mod:`~.pacer`.
 
@@ -170,10 +170,12 @@ def _apply_probe_failure(ring: CookieRing, probe: _Probe) -> None:
         return
     if probe.timed_out:
         if PROXY_POOL.note_hang(probe.proxy):
-            PROXY_POOL.ban(probe.proxy, "Прокси не отвечает слишком долго", wait=False)
+            PROXY_POOL.ban(
+                probe.proxy, "Прокси не отвечает слишком долго", wait=False, rotate_ip=True
+            )
         return
     if probe.dropped:
-        PROXY_POOL.ban(probe.proxy, "Прокси сбросил соединение", wait=False)
+        PROXY_POOL.ban(probe.proxy, "Прокси сбросил соединение", wait=False, rotate_ip=True)
         return
     if probe.antibot:
         PROXY_POOL.ban(probe.proxy, "200 без JSON — антибот вместо API", wait=False)
@@ -215,7 +217,7 @@ def _dispatch_probes(
                 _apply_probe_failure(ring, probe)
                 logger.warning(f"id={slot.get('id')}: отказ status={probe.status or 'сеть'}")
                 continue
-            PROXY_POOL.clear_hangs(probe.proxy)
+            PROXY_POOL.note_ok(probe.proxy)
             any_ok = True
             groups.append(probe.items)
             logger.info(f"id={slot.get('id')}: {len(probe.items)} объявлений")
@@ -318,13 +320,13 @@ def fetch_items(
         else settings.request_timeout
     )
 
-    def rotate(reason: str) -> bool:
-        """Увести набор с забаненного канала; тот меняет IP в фоне."""
+    def rotate(reason: str, *, rotate_ip: bool = False) -> bool:
+        """Увести набор с забаненного канала; IP меняем только если туннель мёртв."""
         nonlocal rotated, client
         if rotated:
             logger.warning(f"{reason}: в этом цикле уже уходили на соседний, оставляю собранное")
             return False
-        PROXY_POOL.ban(ring.proxy_of(slot), reason)
+        PROXY_POOL.ban(ring.proxy_of(slot), reason, rotate_ip=rotate_ip)
         rotated = True
         client = ring.client_for(slot)
         return True
@@ -339,7 +341,7 @@ def fetch_items(
         if hung:
             logger.warning("Прокси не ответил вовремя, IP не меняю")
             return CycleResult(failed=True)
-        if rotate("Прокси сбросил соединение, переключаюсь"):
+        if rotate("Прокси сбросил соединение, переключаюсь", rotate_ip=True):
             try:
                 status, payload = _fetch_page(client, url, page_timeout)
             except RequestException:
@@ -350,16 +352,8 @@ def fetch_items(
 
     if status == net_client.RATE_LIMITED:
         result.throttled = True
-        if PROXY_POOL.size < 2:
-            rotate("429: бан по IP, меняю адрес")
-            return CycleResult(status=status, failed=True, throttled=True)
-        if not rotate("429: бан по IP, переключаюсь на соседний прокси"):
-            return CycleResult(status=status, failed=True, throttled=True)
-        status, payload = _fetch_page(client, url, page_timeout)
-        if status == net_client.RATE_LIMITED:
-            logger.warning("429 и на соседнем прокси — меняю его IP и отдаю цикл")
-            PROXY_POOL.ban(ring.proxy_of(slot), "429 на соседнем канале", wait=False)
-            return CycleResult(status=status, failed=True, throttled=True)
+        PROXY_POOL.ban(ring.proxy_of(slot), "429: бан по IP")
+        return CycleResult(status=status, failed=True, throttled=True)
 
     if status in net_client.COOKIE_BLOCKED:
         result.throttled = True
@@ -389,7 +383,7 @@ def fetch_items(
     items = items_mod.extract_items(payload)
     logger.info(f"Получено из JSON: {len(items)} объявлений")
     result.items = items
-    PROXY_POOL.clear_hangs(ring.proxy_of(slot))
+    PROXY_POOL.note_ok(ring.proxy_of(slot))
     if on_items and items:
         on_items(items)
     return result

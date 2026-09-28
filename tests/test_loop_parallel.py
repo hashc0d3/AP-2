@@ -67,7 +67,10 @@ def test_parallel_fetch_keeps_good_channels_after_429(
     settings: Settings, cookies_dir, monkeypatch
 ) -> None:
     """Один 429 не должен выкидывать цикл, если сосед уже отдал выдачу."""
-    monkeypatch.setattr("avito_monitor.net.proxies.change_ip", lambda *a, **k: None)
+    rotated: list[int] = []
+    monkeypatch.setattr(
+        "avito_monitor.net.proxies.change_ip", lambda *a, **k: rotated.append(1) or ""
+    )
     ring = _six_proxies_and_cookies(cookies_dir, settings)
     runtime = settings.for_search(web_url="", api_url="https://avito.test/items")
     def fake_fetch(client, url, *, attempts=2, timeout=10.0):
@@ -84,6 +87,7 @@ def test_parallel_fetch_keeps_good_channels_after_429(
     assert result.throttled
     assert not result.failed
     assert {item["id"] for item in result.items} == {77}
+    assert rotated == []
 
 
 def test_parallel_fetch_streams_before_slow_channel(
@@ -199,3 +203,37 @@ def test_parallel_timeout_does_not_rotate_ip(settings: Settings, cookies_dir, mo
 
     assert result.failed
     assert rotated == []
+
+
+def test_sequential_429_does_not_retry_neighbor(
+    settings: Settings, cookies_dir, monkeypatch
+) -> None:
+    """Повтор на соседе в том же цикле сжигал второй канал; следующий цикл сам его снимет."""
+    rotated: list[int] = []
+    monkeypatch.setattr(
+        "avito_monitor.net.proxies.change_ip", lambda *a, **k: rotated.append(1) or ""
+    )
+    PROXY_POOL.configure(
+        (("u:p@mproxy.site:20000", "http://change-0"), ("u:p@mproxy.site:20001", "http://change-1"))
+    )
+    for cookie_id in ("101", "102"):
+        slot = _slot(cookie_id)
+        (cookies_dir / f"{slot['id']}.json").write_text(json.dumps(slot), encoding="utf-8")
+    ring = CookieRing(settings)
+    assert ring.refresh() == 2
+    runtime = settings.for_search(web_url="", api_url="https://avito.test/items")
+    calls = {"n": 0}
+
+    def fake_fetch(client, url, *, attempts=2, timeout=10.0):
+        calls["n"] += 1
+        return 429, None
+
+    monkeypatch.setattr(loop_mod.net_client, "fetch_page", fake_fetch)
+
+    result = loop_mod.fetch_items(runtime, ring)
+
+    assert calls["n"] == 1
+    assert result.failed
+    assert result.throttled
+    assert rotated == []
+    assert PROXY_POOL.live_size == 1
