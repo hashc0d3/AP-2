@@ -165,31 +165,40 @@ def why429(settings: Settings, api_url: str = "") -> None:
     if not slots:
         print("  нет готового набора cookies")
         return
-    slot = slots[0]
-    tally: dict[tuple[str, str], int] = {}
-    for proxy_string, _ in settings.proxy_endpoints():
+    # Без cookies Avito отвечает 403 раньше лимита, поэтому адрес проверяем
+    # двумя разными наборами: 429 у обоих — режут адрес, у одного — набор.
+    address = cookie = 0
+    for index, (proxy_string, _) in enumerate(settings.proxy_endpoints()):
         label = proxy_string.rsplit("@", 1)[-1]
         ip = _current_ip(_proxies(proxy_string)) or "?"
-        with_cookies = build_client(slot, proxy_string)
+        pair = (slots[(2 * index) % len(slots)], slots[(2 * index + 1) % len(slots)])
+        codes = []
+        for slot in pair:
+            client = build_client(slot, proxy_string)
+            try:
+                codes.append(_status(client, url))
+            finally:
+                client.close()
+            time.sleep(1)
         bare = curl_requests.Session(impersonate=IMPERSONATE)
         bare.proxies = _proxies(proxy_string)
         try:
-            cooked = _status(with_cookies, url)
-            time.sleep(1)
             plain = _status(bare, url)
         finally:
-            with_cookies.close()
             bare.close()
-        tally[(cooked, plain)] = tally.get((cooked, plain), 0) + 1
-        print(f"  {label} IP {ip}: с cookies {cooked}, без cookies {plain}")
+        if codes[0] == codes[1] == "429":
+            address += 1
+        elif "429" in codes:
+            cookie += 1
+        print(
+            f"  {label} IP {ip}: набор A {codes[0]}, набор B {codes[1]}, без cookies {plain}"
+        )
         time.sleep(1)
 
-    both = tally.get(("429", "429"), 0)
-    cookie_only = sum(count for (cooked, plain), count in tally.items() if cooked == "429" and plain != "429")
-    if both:
-        print(f"  {both} прокси: 429 и без cookies — лимит на адрес или подсеть, ротация и темп не помогут")
-    if cookie_only:
-        print(f"  {cookie_only} прокси: 429 только с cookies — дело в наборе или отпечатке")
+    if address:
+        print(f"  {address} прокси: 429 на обоих наборах — лимит на адрес или подсеть")
+    if cookie:
+        print(f"  {cookie} прокси: 429 только на одном наборе — дело в наборе cookies")
 
 
 def _current_ip(proxies: dict[str, str], timeout: float = IP_CHECK_TIMEOUT) -> str:
