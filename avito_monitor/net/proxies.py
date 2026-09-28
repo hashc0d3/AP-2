@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import threading
-import time
 
 from loguru import logger
 
@@ -39,7 +38,7 @@ class ProxyChannel:
         # раскладываем нагрузку поровну.
         self.leases = 0
         self.last_ip = ""
-        """Последний известный выходной адрес — чтобы не возвращаться в ту же /21."""
+        """Последний известный выходной адрес — для лога /21 после 429."""
 
     @property
     def label(self) -> str:
@@ -55,11 +54,6 @@ class ProxyPool:
         self._lock = threading.Lock()
         self.change_wait = 12.0
         """Сколько ждать подъёма туннеля после смены IP."""
-        self.prefix_block_ttl = 300.0
-        """Сколько секунд не принимать /21, с которой только что пришёл 429."""
-        self.max_prefix_tries = 3
-        """Сколько раз крутить SIM, пока новый адрес в забаненной или занятой /21."""
-        self._blocked_prefixes: dict[str, float] = {}
 
     def configure(self, endpoints: tuple[tuple[str, str], ...]) -> None:
         channels = [
@@ -70,7 +64,6 @@ class ProxyPool:
         with self._lock:
             self._channels = channels
             self._leases.clear()
-            self._blocked_prefixes.clear()
         if not channels:
             logger.warning("Прокси не настроены")
             return
@@ -133,10 +126,7 @@ class ProxyPool:
 
             prefix = ip_prefix21(channel.last_ip)
             if prefix:
-                self._blocked_prefixes[prefix] = time.monotonic() + self.prefix_block_ttl
-                logger.warning(
-                    f"{reason}: {channel.label} {prefix} не использую {self.prefix_block_ttl:.0f} с"
-                )
+                logger.warning(f"{reason}: {channel.label} {prefix}")
 
             spare = [
                 other
@@ -216,45 +206,6 @@ class ProxyPool:
             self._leases[key] = live[position % len(live)]
             live[position % len(live)].leases += 1
 
-    def _avoid_prefixes(self, channel: ProxyChannel) -> set[str]:
-        """Забаненные /21 и те, на которых уже сидит сосед."""
-        now = time.monotonic()
-        stale = [prefix for prefix, until in self._blocked_prefixes.items() if until <= now]
-        for prefix in stale:
-            del self._blocked_prefixes[prefix]
-        hot = set(self._blocked_prefixes)
-        occupied = {
-            ip_prefix21(other.last_ip)
-            for other in self._channels
-            if other is not channel and not other.changing and other.last_ip
-        }
-        return {prefix for prefix in hot | occupied if prefix}
-
-    def _rotate_off_hot_prefix(self, channel: ProxyChannel) -> str:
-        """Крутить SIM, пока выход не из забаненной /21, но не дольше ``max_prefix_tries``."""
-        new_ip = ""
-        tries = max(1, int(self.max_prefix_tries))
-        known = bool(ip_prefix21(channel.last_ip))
-        for attempt in range(1, tries + 1):
-            last = attempt == tries or not known
-            wait = self.change_wait if last else 0.0
-            new_ip = change_ip(channel.change_url, channel.proxy_string, wait_max=wait) or ""
-            prefix = ip_prefix21(new_ip)
-            with self._lock:
-                avoid = self._avoid_prefixes(channel)
-            if not known or not prefix or prefix not in avoid:
-                return new_ip
-            if last:
-                logger.warning(
-                    f"{channel.label}: {new_ip} всё ещё {prefix} после {tries} смен, оставляю"
-                )
-                return new_ip
-            logger.warning(
-                f"{channel.label}: {new_ip} из {prefix}, Avito уже резал эту подсеть — "
-                f"кручу ещё ({attempt}/{tries})"
-            )
-        return new_ip
-
     def _change_async(self, channel: ProxyChannel) -> None:
         """Сменить IP в отдельном потоке: остальные каналы продолжают работать."""
         if not channel.change_url:
@@ -267,7 +218,9 @@ class ProxyPool:
         def worker() -> None:
             new_ip = ""
             try:
-                new_ip = self._rotate_off_hot_prefix(channel)
+                new_ip = change_ip(
+                    channel.change_url, channel.proxy_string, wait_max=self.change_wait
+                ) or ""
             except RuntimeError as err:
                 logger.warning(f"Не удалось сменить IP {channel.label}: {err}")
             finally:

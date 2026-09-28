@@ -17,15 +17,14 @@ from loguru import logger
 def parallel_width(live_proxies: int) -> int:
     """Сколько каналов опрашивать в одном цикле.
 
-    Один живой канал — последовательно: после 429 можно сразу уйти на
-    соседа. Два и больше — параллельно, до трёх снимков SERP. Раньше при
-    2–3 живых (остальные меняют IP) ширина падала в ×1, и шесть портов
-    простаивали.
+    Один живой канал — последовательно. Иначе параллельно до трёх, но
+    всегда оставляем один запасной: иначе после пачки 429 все шесть уходят
+    менять IP и опрос встаёт на ожидание.
     """
     live = max(0, int(live_proxies))
-    if live < 2:
+    if live < 3:
         return 1
-    return min(3, live)
+    return min(3, live - 1)
 
 
 def poll_delay(poll_interval: float, per_cookie_interval: float, cookies: int) -> float:
