@@ -214,6 +214,8 @@ def _fetch_items_parallel(
     any_ok = False
 
     batch = ring.next_many(width, skip_proxies=used_proxies)
+    if not batch and PROXY_POOL.live_size < 1:
+        return CycleResult(failed=True, throttled=True)
     if not batch:
         slot, client = _recover_empty_pool(settings, ring, "Нет рабочих cookies — докупаю")
         if slot is None or client is None:

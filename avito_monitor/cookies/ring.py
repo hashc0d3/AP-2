@@ -165,7 +165,8 @@ class CookieRing:
         Каналы идут по очереди: первым берём тот, что дольше всех не бил
         Avito, поэтому нагрузка ходит по кругу всех прокси, а не по одним
         и тем же. На канале — набор, который дольше всех отдыхал.
-        Каналы из ``skip_proxies`` в этом цикле уже спрашивали.
+        Каналы из ``skip_proxies`` в этом цикле уже спрашивали; каналы на
+        паузе после 429 и со сменой IP пропускаем.
         """
         stale = time.time() - self._refreshed_at > self.REFRESH_EVERY
         if not self._order or stale:
@@ -177,7 +178,7 @@ class CookieRing:
         rested: dict[str, str] = {}
         for key in self._order:
             proxy = PROXY_POOL.proxy_for(key) or self._fallback_proxy
-            if proxy in forbidden:
+            if proxy in forbidden or not PROXY_POOL.is_available(proxy):
                 continue
             best = rested.get(proxy)
             if best is None or self._used_at.get(key, 0.0) < self._used_at.get(best, 0.0):

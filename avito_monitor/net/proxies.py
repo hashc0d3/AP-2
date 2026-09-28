@@ -137,6 +137,13 @@ class ProxyPool:
             channel = self._channel(proxy_string)
             return channel.last_used if channel is not None else 0.0
 
+    def is_available(self, proxy_string: str) -> bool:
+        """Канал можно бить: не отдыхает после 429 и не меняет IP. Чужой прокси — можно."""
+        with self._lock:
+            self._expire_cooldowns()
+            channel = self._channel(proxy_string)
+            return channel is None or self._available(channel)
+
     def wait_available(self, timeout: float) -> bool:
         """Дождаться хоть одного канала, который не отдыхает и не меняет IP."""
         deadline = time.monotonic() + max(0.0, timeout)

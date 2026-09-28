@@ -269,6 +269,28 @@ def test_channels_take_turns_between_cycles(settings: Settings, cookies_dir, mon
     assert first.isdisjoint(ports)
 
 
+def test_spare_skips_channel_that_changes_ip(settings: Settings, cookies_dir, monkeypatch) -> None:
+    """Запасной не берём с порта, который меняет IP: запрос уйдёт в полуподнятый туннель."""
+    monkeypatch.setattr("avito_monitor.net.proxies.change_ip", lambda *a, **k: None)
+    ring = _six_proxies_and_cookies(cookies_dir, settings)
+    runtime = settings.for_search(web_url="", api_url="https://avito.test/items")
+    PROXY_POOL._channels[3].changing = True
+    ports: list[int] = []
+    lock = threading.Lock()
+
+    def fake_fetch(client, url, *, attempts=2, timeout=10.0):
+        with lock:
+            ports.append(_port(client))
+        return 429, None
+
+    monkeypatch.setattr(loop_mod.net_client, "fetch_page", fake_fetch)
+
+    loop_mod.fetch_items(runtime, ring)
+
+    assert 20003 not in ports
+    assert len(ports) == 5
+
+
 def test_all_channels_resting_skips_request(settings: Settings, cookies_dir, monkeypatch) -> None:
     """Все на паузе после 429 — не бьём отдыхающий порт, ждём и отдаём цикл."""
     monkeypatch.setattr("avito_monitor.net.proxies.change_ip", lambda *a, **k: None)

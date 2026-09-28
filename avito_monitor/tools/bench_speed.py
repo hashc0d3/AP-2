@@ -5,6 +5,7 @@
     python -m avito_monitor.tools.bench_speed --probe 8      # keep-alive против нового клиента
     python -m avito_monitor.tools.bench_speed --api 5        # реальные запросы к API Avito
     python -m avito_monitor.tools.bench_speed --ipchange     # сколько занимает смена IP
+    python -m avito_monitor.tools.bench_speed --why429       # 429 из-за адреса или cookies
     python -m avito_monitor.tools.bench_speed --log logs/parser.log
 
 Режим ``--log`` работает без сети и прокси: он разбирает уже накопленный
@@ -142,6 +143,53 @@ def api(settings: Settings, count: int, api_url: str = "") -> None:
     finally:
         client.close()
     print(f"  итог: {_stats(times)}")
+
+
+def _status(client, url: str) -> str:
+    try:
+        return str(client.get(url, timeout=REQUEST_TIMEOUT).status_code)
+    except Exception as err:
+        return f"ошибка {type(err).__name__}"
+
+
+def why429(settings: Settings, api_url: str = "") -> None:
+    """Один запрос с cookies и один без них через каждый прокси.
+
+    429 и там, и там — Avito режет адрес или подсеть оператора, cookies ни
+    при чём. 429 только с cookies — набор или отпечаток. Запускать при
+    остановленном поиске, иначе порты ещё остывают от нашего опроса.
+    """
+    url = api_url or catalog.build_api_url(default_region().slug, catalog.default_category().id)
+    print("\n=== Откуда 429: адрес или cookies ===")
+    slots = usable_slots()
+    if not slots:
+        print("  нет готового набора cookies")
+        return
+    slot = slots[0]
+    tally: dict[tuple[str, str], int] = {}
+    for proxy_string, _ in settings.proxy_endpoints():
+        label = proxy_string.rsplit("@", 1)[-1]
+        ip = _current_ip(_proxies(proxy_string)) or "?"
+        with_cookies = build_client(slot, proxy_string)
+        bare = curl_requests.Session(impersonate=IMPERSONATE)
+        bare.proxies = _proxies(proxy_string)
+        try:
+            cooked = _status(with_cookies, url)
+            time.sleep(1)
+            plain = _status(bare, url)
+        finally:
+            with_cookies.close()
+            bare.close()
+        tally[(cooked, plain)] = tally.get((cooked, plain), 0) + 1
+        print(f"  {label} IP {ip}: с cookies {cooked}, без cookies {plain}")
+        time.sleep(1)
+
+    both = tally.get(("429", "429"), 0)
+    cookie_only = sum(count for (cooked, plain), count in tally.items() if cooked == "429" and plain != "429")
+    if both:
+        print(f"  {both} прокси: 429 и без cookies — лимит на адрес или подсеть, ротация и темп не помогут")
+    if cookie_only:
+        print(f"  {cookie_only} прокси: 429 только с cookies — дело в наборе или отпечатке")
 
 
 def _current_ip(proxies: dict[str, str], timeout: float = IP_CHECK_TIMEOUT) -> str:
@@ -339,6 +387,9 @@ def main() -> None:
     parser.add_argument("--api", type=int, metavar="N", help="замерить запросы к API Avito")
     parser.add_argument("--api-url", default="", help="свой API URL для режима --api")
     parser.add_argument("--ipchange", action="store_true", help="замерить смену IP")
+    parser.add_argument(
+        "--why429", action="store_true", help="по каждому прокси: 429 с cookies и без"
+    )
     parser.add_argument("--log", metavar="PATH", help="разобрать лог парсера")
     parser.add_argument(
         "--since",
@@ -348,14 +399,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if not any([args.probe, args.api, args.ipchange, args.log]):
+    if not any([args.probe, args.api, args.ipchange, args.why429, args.log]):
         parser.print_help()
         return
 
     # Разбор лога сети не требует, поэтому настройки читаем только при нужде.
     if args.log:
         log_report(args.log, args.since)
-    if not any([args.probe, args.api, args.ipchange]):
+    if not any([args.probe, args.api, args.ipchange, args.why429]):
         return
 
     settings = load_settings()
@@ -365,6 +416,8 @@ def main() -> None:
         api(settings, args.api, args.api_url)
     if args.ipchange:
         ipchange(settings)
+    if args.why429:
+        why429(settings, args.api_url)
 
 
 if __name__ == "__main__":
