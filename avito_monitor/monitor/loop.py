@@ -561,6 +561,7 @@ def main() -> None:
 
     PROXY_POOL.change_wait = settings.ip_change_wait
     PROXY_POOL.configure(settings.proxy_endpoints())
+    PROXY_POOL.learn_ips()
     service.start_background(settings)
     ensure_proxy_bypasses_vpn()
     start_server(settings)

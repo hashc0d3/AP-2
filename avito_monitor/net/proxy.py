@@ -41,6 +41,22 @@ def proxy_is_live(proxy_string: str, timeout: float = PROBE_TIMEOUT) -> bool:
     return True
 
 
+IP_URL = "https://api.ipify.org/?format=text"
+
+
+def current_ip(proxy_string: str, timeout: float = 5.0) -> str:
+    """Внешний адрес прокси сейчас; пустая строка — не удалось узнать."""
+    proxy_url = f"http://{proxy_string}"
+    try:
+        response = requests.get(
+            IP_URL, proxies={"http": proxy_url, "https": proxy_url}, timeout=timeout
+        )
+    except requests.RequestException:
+        return ""
+    text = response.text.strip()
+    return text if ip_prefix21(text) else ""
+
+
 def ip_prefix21(ip: str | None) -> str:
     """Подсеть ``a.b.x.0/21``, по которой Avito обычно банит, а не по одному адресу."""
     if not ip:

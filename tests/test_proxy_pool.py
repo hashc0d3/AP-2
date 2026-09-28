@@ -258,6 +258,24 @@ def test_json_clears_429_strikes(monkeypatch) -> None:
     assert change.calls == []
 
 
+def test_429_rests_ports_from_the_same_subnet(monkeypatch) -> None:
+    """Два порта в одной /21 для Avito — один адрес: второй не запасной."""
+    change = FakeChange(monkeypatch)
+    pool = ProxyPool()
+    C = ("u:p@mproxy.site:30000", "http://change-c")
+    pool.configure((A, B, C))
+    pool._channels[0].last_ip = "178.157.168.10"
+    pool._channels[1].last_ip = "178.157.171.200"
+    pool._channels[2].last_ip = "91.78.32.5"
+
+    pool.ban(A[0], "429")
+
+    assert change.calls == []
+    assert not pool.is_available(B[0])
+    assert pool.is_available(C[0])
+    assert pool._channels[1].strikes == 0
+
+
 def test_cooldown_expires_and_channel_returns(monkeypatch) -> None:
     FakeChange(monkeypatch)
     pool = ProxyPool()

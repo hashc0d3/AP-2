@@ -18,7 +18,7 @@ import time
 
 from loguru import logger
 
-from avito_monitor.net.proxy import change_ip, ip_prefix21
+from avito_monitor.net.proxy import change_ip, current_ip, ip_prefix21
 
 
 def _label(proxy_string: str) -> str:
@@ -124,6 +124,25 @@ class ProxyPool:
             )
             return channel.hangs >= self.TIMEOUT_BAN_STREAK
 
+    def learn_ips(self) -> None:
+        """Узнать адрес каждого канала в фоне: без него не видно общих /21."""
+        with self._lock:
+            channels = list(self._channels)
+
+        def worker(channel: ProxyChannel) -> None:
+            ip = current_ip(channel.proxy_string)
+            if not ip:
+                return
+            with self._lock:
+                if not channel.last_ip:
+                    channel.last_ip = ip
+            logger.info(f"{channel.label}: адрес {ip} ({ip_prefix21(ip)})")
+
+        for channel in channels:
+            threading.Thread(
+                target=worker, args=(channel,), name=f"ip-learn-{channel.label}", daemon=True
+            ).start()
+
     def touch(self, proxy_string: str) -> None:
         """Канал ушёл в запрос — в очереди он становится последним."""
         with self._lock:
@@ -228,6 +247,24 @@ class ProxyPool:
             prefix = ip_prefix21(channel.last_ip)
             if prefix:
                 logger.warning(f"{reason}: {channel.label} {prefix}")
+
+            # Avito режет подсеть целиком: порт с адресом из той же /21 —
+            # не запасной, а следующий 429.
+            siblings = [
+                other
+                for other in self._channels
+                if not rotate_ip
+                and prefix
+                and other is not channel
+                and self._available(other)
+                and ip_prefix21(other.last_ip) == prefix
+            ]
+            for other in siblings:
+                other.cooling_until = time.monotonic() + self.ban_cooldown
+            if siblings:
+                names = ", ".join(other.label for other in siblings)
+                logger.warning(f"{reason}: та же {prefix} у {names} — тоже на паузу")
+                self._rebalance()
 
             spare = [
                 other
@@ -371,8 +408,7 @@ class ProxyPool:
                 logger.warning(f"Не удалось сменить IP {channel.label}: {err}")
             finally:
                 with self._lock:
-                    if new_ip:
-                        channel.last_ip = new_ip
+                    channel.last_ip = new_ip
                     channel.changing = False
                     channel.strikes = 0
                     channel.hangs = 0
