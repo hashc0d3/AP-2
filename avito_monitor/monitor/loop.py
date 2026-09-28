@@ -220,7 +220,6 @@ def _fetch_items_parallel(
                 logger.warning(f"id={slot.get('id')}: отказ status={probe.status or 'сеть'}")
                 continue
             any_ok = True
-            PROXY_POOL.note_ok(probe.proxy)
             groups.append(probe.items)
             logger.info(f"id={slot.get('id')}: {len(probe.items)} объявлений")
             if on_items and probe.items:
@@ -329,7 +328,6 @@ def fetch_items(
     items = items_mod.extract_items(payload)
     logger.info(f"Получено из JSON: {len(items)} объявлений")
     result.items = items
-    PROXY_POOL.note_ok(ring.proxy_of(slot))
     if on_items and items:
         on_items(items)
     return result
