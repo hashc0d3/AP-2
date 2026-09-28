@@ -43,8 +43,8 @@ from avito_monitor.search_session import SESSION
 
 ItemsCallback = Callable[[list[dict]], None]
 
-PARALLEL_PROBE_TIMEOUT = 3.0
-"""В параллели не ждём полный ``request_timeout``: лента уже ушла с быстрого канала, а висящий туннель держал следующий цикл 12+ с."""
+PARALLEL_PROBE_TIMEOUT = 5.0
+"""В параллели не ждём полный ``request_timeout``: 3 с резали живой JSON (TLS+выдача через mproxy часто 3–5 с), 12 с держали следующий цикл."""
 
 
 def _is_timeout(err: BaseException) -> bool:
