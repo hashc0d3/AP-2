@@ -39,6 +39,7 @@ class ProxyChannel:
         "hangs",
         "cooling_until",
         "strikes",
+        "bans",
         "last_used",
     )
 
@@ -59,6 +60,8 @@ class ProxyChannel:
         """До этого момента (monotonic) канал не берём в опрос: недавний 429."""
         self.strikes = 0
         """Сколько 429 подряд на этом порту. После серии — меняем IP."""
+        self.bans = 0
+        """429 подряд без единого JSON, смена IP не сбрасывает: по нему растёт пауза."""
         self.last_used = 0.0
         """Когда (monotonic) канал последний раз ушёл в запрос — для очереди."""
 
@@ -83,6 +86,13 @@ class ProxyPool:
         """После 429 с запасом каналов не крутим IP: соседние порты уже другие /21."""
         self.ip_change_after_strikes = 3
         """Смена IP, когда один порт поймал столько 429 подряд."""
+        self.ban_cooldown_max = 240.0
+        """Потолок паузы: порт, чей пул адресов Avito режет целиком, почти не бьём."""
+
+    def _cooldown(self, channel: ProxyChannel) -> float:
+        """Пауза после 429 удваивается с каждым отказом подряд, пока нет JSON."""
+        steps = max(0, channel.bans - 1)
+        return min(self.ban_cooldown * 2**steps, self.ban_cooldown_max)
 
     def configure(self, endpoints: tuple[tuple[str, str], ...]) -> None:
         channels = [
@@ -181,6 +191,7 @@ class ProxyPool:
             channel = self._channel(proxy_string)
             if channel is not None:
                 channel.strikes = 0
+                channel.bans = 0
                 channel.hangs = 0
 
     def clear_hangs(self, proxy_string: str) -> None:
@@ -273,6 +284,8 @@ class ProxyPool:
             ]
             if not rotate_ip:
                 channel.strikes += 1
+                channel.bans += 1
+            cooldown = self._cooldown(channel)
             need_rotate = (
                 rotate_ip
                 or not spare
@@ -289,8 +302,9 @@ class ProxyPool:
                     )
                 else:
                     logger.warning(
-                        f"{reason}: {channel.label} пауза {self.ban_cooldown:.0f} с "
-                        f"без смены IP, наборы уходят на {names}"
+                        f"{reason}: {channel.label} пауза {cooldown:.0f} с "
+                        f"без смены IP ({channel.bans}-й отказ подряд), "
+                        f"наборы уходят на {names}"
                     )
             elif len(self._channels) > 1:
                 logger.warning(f"{reason}: свободных каналов нет, жду новый IP на {channel.label}")
@@ -298,7 +312,7 @@ class ProxyPool:
                 logger.warning(f"{reason}: один прокси ({channel.label}), меняю IP")
 
             if not need_rotate:
-                channel.cooling_until = time.monotonic() + self.ban_cooldown
+                channel.cooling_until = time.monotonic() + cooldown
                 self._resettle(channel, spare)
                 return
 

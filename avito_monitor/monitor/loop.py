@@ -187,9 +187,12 @@ def _apply_probe_failure(ring: CookieRing, probe: _Probe) -> None:
         PROXY_POOL.ban(probe.proxy, "429: бан по IP", wait=False)
 
 
+def _proxy_label(proxy: str) -> str:
+    return proxy.rsplit("@", 1)[-1] or "без прокси"
+
+
 def _slot_label(ring: CookieRing, slot: dict) -> str:
-    proxy = ring.proxy_of(slot).rsplit("@", 1)[-1] or "без прокси"
-    return f"id={slot.get('id')} через {proxy}"
+    return f"id={slot.get('id')} через {_proxy_label(ring.proxy_of(slot))}"
 
 
 def _fetch_items_parallel(
@@ -250,13 +253,19 @@ def _fetch_items_parallel(
                     PROXY_POOL.note_ok(probe.proxy)
                     any_ok = True
                     groups.append(probe.items)
-                    logger.info(f"id={slot.get('id')}: {len(probe.items)} объявлений")
+                    logger.info(
+                        f"id={slot.get('id')}: {len(probe.items)} объявлений "
+                        f"через {_proxy_label(probe.proxy)}"
+                    )
                     if on_items and probe.items:
                         on_items(probe.items)
                     continue
                 throttled = throttled or probe.throttled
                 _apply_probe_failure(ring, probe)
-                logger.warning(f"id={slot.get('id')}: отказ status={probe.status or 'сеть'}")
+                logger.warning(
+                    f"id={slot.get('id')}: отказ status={probe.status or 'сеть'} "
+                    f"через {_proxy_label(probe.proxy)}"
+                )
                 if any_ok:
                     continue
                 spare = ring.next_many(1, skip_proxies=used_proxies)

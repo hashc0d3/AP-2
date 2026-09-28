@@ -254,7 +254,9 @@ def ipchange(settings: Settings) -> None:
 # ── Разбор лога ────────────────────────────────────────────────────────────
 
 _TIMESTAMP_RE = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+)")
-_CYCLE_RE = re.compile(r"Цикл на cookie id=(\S+)")
+_CYCLE_RE = re.compile(r"Цикл (?:на cookie id=\S+|параллельно)")
+_PORT_OK_RE = re.compile(r"id=\S+: \d+ объявлений через (\S+)")
+_PORT_FAIL_RE = re.compile(r"id=\S+: отказ status=(\S+) через (\S+)")
 _RECEIVED_RE = re.compile(r"Получено объявлений: (\d+)")
 _AGE_RE = re.compile(r"Новых объявлений: (\d+), возраст (\d+)[–-](\d+) сек")
 _IP_RE = re.compile(r"Новый IP: (\d+\.\d+\.\d+\.\d+)")
@@ -307,6 +309,7 @@ def log_report(path: str, since: str = "") -> None:
     ages_max: list[float] = []
     ads_total = 0
     counters = dict.fromkeys(_EVENTS, 0)
+    ports: dict[str, dict[str, int]] = {}
     pending_cycle: float | None = None
 
     for line in lines:
@@ -329,6 +332,16 @@ def log_report(path: str, since: str = "") -> None:
         ip_match = _IP_RE.search(line)
         if ip_match:
             proxy_ips.append(ip_match.group(1))
+
+        ok_match = _PORT_OK_RE.search(line)
+        if ok_match:
+            per_port = ports.setdefault(ok_match.group(1), {})
+            per_port["JSON"] = per_port.get("JSON", 0) + 1
+        fail_match = _PORT_FAIL_RE.search(line)
+        if fail_match:
+            status, port = fail_match.groups()
+            per_port = ports.setdefault(port, {})
+            per_port[status] = per_port.get(status, 0) + 1
 
         for name, needle in _EVENTS.items():
             if needle in line:
@@ -353,6 +366,14 @@ def log_report(path: str, since: str = "") -> None:
     for name, count in triggered.items():
         share = count / max(1, len(cycle_starts)) * 100
         print(f"    {name}: {count} раз ({share:.1f}% циклов)")
+
+    if ports:
+        print("\n  Ответы по портам (JSON — отдал выдачу):")
+        for port, codes in sorted(ports.items(), key=lambda entry: -entry[1].get("JSON", 0)):
+            total = sum(codes.values())
+            share = codes.get("JSON", 0) / total * 100
+            detail = ", ".join(f"{code} {count}" for code, count in sorted(codes.items()))
+            print(f"    {port}: JSON {share:.0f}% из {total} — {detail}")
 
     if proxy_ips:
         _report_subnets(proxy_ips, len(cycle_starts))

@@ -66,6 +66,30 @@ def test_first_429_cools_without_changing_ip(monkeypatch) -> None:
     assert pool.proxy_for("101") == B[0]
 
 
+def test_cooldown_doubles_until_port_returns_json(monkeypatch) -> None:
+    """Порт, чей пул адресов Avito режет целиком, отдыхает всё дольше."""
+    FakeChange(monkeypatch)
+    pool = ProxyPool()
+    C = ("u:p@mproxy.site:30000", "http://change-c")
+    pool.configure((A, B, C))
+    bad = pool._channels[0]
+
+    pauses = []
+    for _ in range(2):
+        before = time.monotonic()
+        pool.ban(A[0], "429")
+        pauses.append(bad.cooling_until - before)
+        bad.cooling_until = 0.0
+    assert 19 < pauses[0] <= 20.5
+    assert 39 < pauses[1] <= 40.5
+
+    bad.bans = 10
+    assert pool._cooldown(bad) == pool.ban_cooldown_max
+
+    pool.note_ok(A[0])
+    assert bad.bans == 0
+
+
 def test_cookies_are_split_between_channels(monkeypatch) -> None:
     """Ради этого всё и затевалось: каждый IP берёт свою половину запросов."""
     FakeChange(monkeypatch)
