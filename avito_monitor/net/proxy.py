@@ -41,9 +41,24 @@ def proxy_is_live(proxy_string: str, timeout: float = PROBE_TIMEOUT) -> bool:
     return True
 
 
-def change_ip(change_url: str, proxy_string: str = "", wait_max: float = 12.0) -> None:
+def ip_prefix21(ip: str | None) -> str:
+    """Подсеть ``a.b.x.0/21``, по которой Avito обычно банит, а не по одному адресу."""
+    if not ip:
+        return ""
+    parts = ip.strip().split(".")
+    if len(parts) != 4:
+        return ""
+    try:
+        third = int(parts[2])
+    except ValueError:
+        return ""
+    return f"{parts[0]}.{parts[1]}.{third // 8 * 8}.0/21"
+
+
+def change_ip(change_url: str, proxy_string: str = "", wait_max: float = 12.0) -> str:
     """Сменить внешний IP мобильного прокси и дождаться туннеля.
 
+    Возвращает новый адрес из ответа оператора или пустую строку.
     :raises RuntimeError: сервис смены IP не ответил.
     """
     if not change_url:
@@ -57,18 +72,20 @@ def change_ip(change_url: str, proxy_string: str = "", wait_max: float = 12.0) -
     except requests.RequestException as err:
         raise RuntimeError(f"Смена IP не прошла: {err}") from err
 
-    logger.info(f"Новый IP: {_reported_ip(response) or 'ок'}")
+    new_ip = _reported_ip(response)
+    logger.info(f"Новый IP: {new_ip or 'ок'}")
 
     if wait_max <= 0:
-        return
+        return new_ip
 
     deadline = started + wait_max
     while time.time() < deadline:
         if proxy_is_live(proxy_string):
             logger.info(f"Прокси готов через {time.time() - started:.1f} с")
-            return
+            return new_ip
         time.sleep(_POLL_STEP)
     logger.warning(f"Прокси не ответил за {wait_max:.0f} с после смены IP")
+    return new_ip
 
 
 def _reported_ip(response: requests.Response) -> str:

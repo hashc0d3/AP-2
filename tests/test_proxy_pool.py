@@ -6,6 +6,7 @@ import threading
 import time
 
 from avito_monitor.net.proxies import PROXY_POOL, ProxyPool, current_proxy_string
+from avito_monitor.net.proxy import ip_prefix21
 
 A = ("u:p@mproxy.site:20085", "http://change-a")
 B = ("u:p@mproxy.site:10341", "http://change-b")
@@ -191,3 +192,63 @@ def test_current_proxy_string_falls_back() -> None:
     assert current_proxy_string("fallback") == "fallback"
     PROXY_POOL.configure((("u:p@host:1", "http://x"),))
     assert current_proxy_string("fallback") == "u:p@host:1"
+
+
+def test_ip_prefix21_groups_neighbours() -> None:
+    assert ip_prefix21("128.71.200.149") == "128.71.200.0/21"
+    assert ip_prefix21("128.71.201.1") == "128.71.200.0/21"
+    assert ip_prefix21("128.71.208.1") == "128.71.208.0/21"
+    assert ip_prefix21("89.113.144.5") == "89.113.144.0/21"
+    assert ip_prefix21("bad") == ""
+    assert ip_prefix21("") == ""
+    assert ip_prefix21(None) == ""
+
+
+def test_retries_ip_change_while_new_address_stays_in_banned_slash21(monkeypatch) -> None:
+    """128.71.200 и 128.71.201 — одна /21; 89.113 — другая, на ней останавливаемся."""
+    ips = ["128.71.200.10", "128.71.201.11", "89.113.144.5"]
+    waits: list[float] = []
+
+    def fake_change(url: str, proxy_string: str = "", wait_max: float = 12.0) -> str:
+        waits.append(wait_max)
+        return ips.pop(0)
+
+    monkeypatch.setattr("avito_monitor.net.proxies.change_ip", fake_change)
+    pool = ProxyPool()
+    pool.configure((A, B))
+    pool.max_prefix_tries = 3
+    pool._channels[0].last_ip = "128.71.200.1"
+
+    pool.ban(A[0], "429")
+
+    deadline = time.monotonic() + 2.0
+    while pool._channels[0].changing:
+        assert time.monotonic() < deadline, "канал не вышел из смены IP"
+        time.sleep(0.01)
+
+    assert pool._channels[0].last_ip == "89.113.144.5"
+    assert waits == [0.0, 0.0, pool.change_wait]
+    assert ips == []
+
+
+def test_stops_retrying_when_slash21_cannot_leave(monkeypatch) -> None:
+    ips = ["31.173.80.1", "31.173.81.2", "31.173.82.3"]
+
+    def fake_change(url: str, proxy_string: str = "", wait_max: float = 12.0) -> str:
+        return ips.pop(0)
+
+    monkeypatch.setattr("avito_monitor.net.proxies.change_ip", fake_change)
+    pool = ProxyPool()
+    pool.configure((A,))
+    pool.max_prefix_tries = 3
+    pool._channels[0].last_ip = "31.173.83.148"
+
+    pool.ban(A[0], "429")
+
+    deadline = time.monotonic() + 2.0
+    while pool._channels[0].changing:
+        assert time.monotonic() < deadline, "канал не вышел из смены IP"
+        time.sleep(0.01)
+
+    assert pool._channels[0].last_ip == "31.173.82.3"
+    assert ips == []
