@@ -39,6 +39,7 @@ class ProxyChannel:
         "hangs",
         "cooling_until",
         "strikes",
+        "last_used",
     )
 
     def __init__(self, proxy_string: str, change_url: str) -> None:
@@ -58,6 +59,8 @@ class ProxyChannel:
         """До этого момента (monotonic) канал не берём в опрос: недавний 429."""
         self.strikes = 0
         """Сколько 429 подряд на этом порту. После серии — меняем IP."""
+        self.last_used = 0.0
+        """Когда (monotonic) канал последний раз ушёл в запрос — для очереди."""
 
     @property
     def label(self) -> str:
@@ -120,6 +123,29 @@ class ProxyPool:
                 f"({channel.hangs}/{self.TIMEOUT_BAN_STREAK})"
             )
             return channel.hangs >= self.TIMEOUT_BAN_STREAK
+
+    def touch(self, proxy_string: str) -> None:
+        """Канал ушёл в запрос — в очереди он становится последним."""
+        with self._lock:
+            channel = self._channel(proxy_string)
+            if channel is not None:
+                channel.last_used = time.monotonic()
+
+    def last_used(self, proxy_string: str) -> float:
+        """Когда канал последний раз бил Avito; ``0`` — ещё ни разу."""
+        with self._lock:
+            channel = self._channel(proxy_string)
+            return channel.last_used if channel is not None else 0.0
+
+    def wait_available(self, timeout: float) -> bool:
+        """Дождаться хоть одного канала, который не отдыхает и не меняет IP."""
+        deadline = time.monotonic() + max(0.0, timeout)
+        while True:
+            if self.live_size > 0:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.2)
 
     def note_ok(self, proxy_string: str) -> None:
         """Канал отдал ответ — сбрасываем серию 429 и таймаутов."""

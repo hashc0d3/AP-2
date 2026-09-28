@@ -49,6 +49,8 @@ class CookieRing:
         self._order: list[str] = []
         self._index = 0
         self._refreshed_at = 0.0
+        self._used_at: dict[str, float] = {}
+        """Когда набор последний раз ушёл в запрос: внутри канала берём самый отдохнувший."""
 
     # ── Состав кольца ───────────────────────────────────────────────────
 
@@ -151,47 +153,45 @@ class CookieRing:
         key = self._order[self._index % len(self._order)]
         self._index = (self._index + 1) % len(self._order)
         slot = self._slots[key]
-        return slot, self.client_for(slot)
+        client = self.client_for(slot)
+        self._mark_used(key)
+        return slot, client
 
     def next_many(
         self, n: int, *, skip_proxies: set[str] | frozenset[str] | None = None
     ) -> list[tuple[dict, Session]]:
         """До ``n`` наборов на разных каналах — для параллельного опроса.
 
-        Наборы, чей прокси уже попал в пачку или в ``skip_proxies``,
-        пропускаются: их снимок SERP в этом цикле не нужен, а лимит Avito
-        на IP не сжигается дважды.
+        Каналы идут по очереди: первым берём тот, что дольше всех не бил
+        Avito, поэтому нагрузка ходит по кругу всех прокси, а не по одним
+        и тем же. На канале — набор, который дольше всех отдыхал.
+        Каналы из ``skip_proxies`` в этом цикле уже спрашивали.
         """
-        width = max(1, n)
-        forbidden = set(skip_proxies or ())
-        first_slot, first_client = self.next()
-        if first_slot is None or first_client is None:
+        stale = time.time() - self._refreshed_at > self.REFRESH_EVERY
+        if not self._order or stale:
+            self.refresh()
+        if not self._order:
             return []
 
-        batch: list[tuple[dict, Session]] = []
-        seen_keys = {str(first_slot.get("id"))}
-        seen_proxies: set[str] = set()
-        first_proxy = self.proxy_of(first_slot)
-        if first_proxy not in forbidden:
-            seen_proxies.add(first_proxy)
-            batch.append((first_slot, first_client))
-            if width == 1:
-                return batch
-
-        scanned = 1
-        total = len(self._order)
-        while len(batch) < width and scanned < total:
-            slot, client = self.next()
-            scanned += 1
-            if slot is None or client is None:
-                break
-            key = str(slot.get("id"))
-            if key in seen_keys:
-                break
-            seen_keys.add(key)
-            proxy = self.proxy_of(slot)
-            if proxy in seen_proxies or proxy in forbidden:
+        forbidden = set(skip_proxies or ())
+        rested: dict[str, str] = {}
+        for key in self._order:
+            proxy = PROXY_POOL.proxy_for(key) or self._fallback_proxy
+            if proxy in forbidden:
                 continue
-            seen_proxies.add(proxy)
-            batch.append((slot, client))
+            best = rested.get(proxy)
+            if best is None or self._used_at.get(key, 0.0) < self._used_at.get(best, 0.0):
+                rested[proxy] = key
+
+        queue = sorted(rested, key=PROXY_POOL.last_used)[: max(1, n)]
+        batch: list[tuple[dict, Session]] = []
+        for proxy in queue:
+            key = rested[proxy]
+            slot = self._slots[key]
+            batch.append((slot, self.client_for(slot)))
+            self._mark_used(key)
         return batch
+
+    def _mark_used(self, key: str) -> None:
+        self._used_at[key] = time.monotonic()
+        PROXY_POOL.touch(self._proxy_of.get(key, ""))

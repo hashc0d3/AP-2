@@ -14,17 +14,18 @@ from __future__ import annotations
 from loguru import logger
 
 
-def parallel_width(live_proxies: int) -> int:
-    """Сколько каналов опрашивать в одном цикле.
+ACTIVE_CHANNELS = 3
+"""Сколько прокси бьют Avito в одном цикле; остальные ждут в запасе.
 
-    Пока живых меньше трёх — последовательно (в цикле ещё есть уход на
-    соседа). Иначе все живые, кроме одного запасного: после пачки 429
-    опрос не встаёт ждать смену IP, а запасной сразу даёт второй снимок.
-    """
-    live = max(0, int(live_proxies))
-    if live < 3:
-        return 1
-    return live - 1
+Пять разом ловили 429 на трёх-четырёх портах одновременно, и запаса не
+оставалось. Три в работе — каждый IP спрашивают вдвое реже, а отказавший
+сразу заменяет запасной.
+"""
+
+
+def parallel_width(live_proxies: int) -> int:
+    """Сколько каналов опрашивать в начале цикла: до трёх, но не больше живых."""
+    return max(1, min(ACTIVE_CHANNELS, int(live_proxies)))
 
 
 def poll_delay(poll_interval: float, per_cookie_interval: float, cookies: int) -> float:

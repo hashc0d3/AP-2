@@ -10,6 +10,7 @@ from avito_monitor.config import Settings
 from avito_monitor.cookies import pool
 from avito_monitor.cookies.ring import CookieRing
 from avito_monitor.monitor import loop as loop_mod
+from avito_monitor.monitor.pacer import ACTIVE_CHANNELS
 from avito_monitor.monitor.seen import SeenStore
 from avito_monitor.net.proxies import PROXY_POOL
 
@@ -60,7 +61,7 @@ def test_parallel_fetch_merges_unique_ids(settings: Settings, cookies_dir, monke
 
     assert not result.failed
     assert 1 in ids
-    assert len(ids) == 6
+    assert len(ids) == 1 + ACTIVE_CHANNELS
 
 
 def test_parallel_fetch_keeps_good_channels_after_429(
@@ -160,8 +161,10 @@ def test_run_cycle_publishes_each_channel_without_duplicates(
     assert 2 in flat
 
 
-def test_parallel_second_wave_after_all_429(settings: Settings, cookies_dir, monkeypatch) -> None:
-    """Первая пятёрка 429 — запасной канал снимает выдачу в том же цикле."""
+def test_spares_replace_every_429_in_the_same_cycle(
+    settings: Settings, cookies_dir, monkeypatch
+) -> None:
+    """Пять отказов подряд — шестой прокси из запаса снимает выдачу в том же цикле."""
     monkeypatch.setattr("avito_monitor.net.proxies.change_ip", lambda *a, **k: None)
     ring = _six_proxies_and_cookies(cookies_dir, settings)
     runtime = settings.for_search(web_url="", api_url="https://avito.test/items")
@@ -177,7 +180,7 @@ def test_parallel_second_wave_after_all_429(settings: Settings, cookies_dir, mon
 
     result = loop_mod.fetch_items(runtime, ring)
 
-    assert calls["n"] >= 6
+    assert calls["n"] == 6
     assert result.throttled
     assert not result.failed
     assert {item["id"] for item in result.items} == {55}
@@ -205,35 +208,84 @@ def test_parallel_timeout_does_not_rotate_ip(settings: Settings, cookies_dir, mo
     assert rotated == []
 
 
-def test_sequential_429_does_not_retry_neighbor(
+def _port(client) -> int:
+    proxies = client.proxies or {}
+    return int(str(proxies.get("https") or proxies.get("http") or "").rsplit(":", 1)[-1])
+
+
+def test_429_launches_spare_without_waiting_for_the_rest(
     settings: Settings, cookies_dir, monkeypatch
 ) -> None:
-    """Повтор на соседе в том же цикле сжигал второй канал; следующий цикл сам его снимет."""
+    """Отказ сразу заменяет запасной, пока соседи ещё качают JSON; SIM не крутим."""
     rotated: list[int] = []
     monkeypatch.setattr(
         "avito_monitor.net.proxies.change_ip", lambda *a, **k: rotated.append(1) or ""
     )
-    PROXY_POOL.configure(
-        (("u:p@mproxy.site:20000", "http://change-0"), ("u:p@mproxy.site:20001", "http://change-1"))
-    )
-    for cookie_id in ("101", "102"):
-        slot = _slot(cookie_id)
-        (cookies_dir / f"{slot['id']}.json").write_text(json.dumps(slot), encoding="utf-8")
-    ring = CookieRing(settings)
-    assert ring.refresh() == 2
+    ring = _six_proxies_and_cookies(cookies_dir, settings)
     runtime = settings.for_search(web_url="", api_url="https://avito.test/items")
-    calls = {"n": 0}
+    ports: list[int] = []
+    lock = threading.Lock()
 
     def fake_fetch(client, url, *, attempts=2, timeout=10.0):
-        calls["n"] += 1
-        return 429, None
+        port = _port(client)
+        with lock:
+            ports.append(port)
+        if port == 20000:
+            return 429, None
+        time.sleep(0.2)
+        return 200, {"items": [{"id": port}]}
 
     monkeypatch.setattr(loop_mod.net_client, "fetch_page", fake_fetch)
 
     result = loop_mod.fetch_items(runtime, ring)
 
-    assert calls["n"] == 1
-    assert result.failed
-    assert result.throttled
+    assert not result.failed
+    assert len(ports) == ACTIVE_CHANNELS + 1
     assert rotated == []
-    assert PROXY_POOL.live_size == 1
+
+
+def test_channels_take_turns_between_cycles(settings: Settings, cookies_dir, monkeypatch) -> None:
+    """Второй цикл берёт три отдохнувших прокси, а не те же самые."""
+    monkeypatch.setattr("avito_monitor.net.proxies.change_ip", lambda *a, **k: None)
+    ring = _six_proxies_and_cookies(cookies_dir, settings)
+    runtime = settings.for_search(web_url="", api_url="https://avito.test/items")
+    ports: list[int] = []
+    lock = threading.Lock()
+
+    def fake_fetch(client, url, *, attempts=2, timeout=10.0):
+        port = _port(client)
+        with lock:
+            ports.append(port)
+        return 200, {"items": [{"id": port}]}
+
+    monkeypatch.setattr(loop_mod.net_client, "fetch_page", fake_fetch)
+
+    loop_mod.fetch_items(runtime, ring)
+    first = set(ports)
+    ports.clear()
+    loop_mod.fetch_items(runtime, ring)
+
+    assert len(first) == ACTIVE_CHANNELS
+    assert first.isdisjoint(ports)
+
+
+def test_all_channels_resting_skips_request(settings: Settings, cookies_dir, monkeypatch) -> None:
+    """Все на паузе после 429 — не бьём отдыхающий порт, ждём и отдаём цикл."""
+    monkeypatch.setattr("avito_monitor.net.proxies.change_ip", lambda *a, **k: None)
+    monkeypatch.setattr(loop_mod, "ALL_RESTING_WAIT", 0.05)
+    ring = _six_proxies_and_cookies(cookies_dir, settings)
+    runtime = settings.for_search(web_url="", api_url="https://avito.test/items")
+    for channel in PROXY_POOL._channels:
+        channel.cooling_until = time.monotonic() + 60
+    calls = {"n": 0}
+
+    def fake_fetch(client, url, *, attempts=2, timeout=10.0):
+        calls["n"] += 1
+        return 200, {"items": [{"id": 1}]}
+
+    monkeypatch.setattr(loop_mod.net_client, "fetch_page", fake_fetch)
+
+    result = loop_mod.fetch_items(runtime, ring)
+
+    assert result.failed
+    assert calls["n"] == 0
