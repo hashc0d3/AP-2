@@ -201,6 +201,45 @@ def why429(settings: Settings, api_url: str = "") -> None:
         print(f"  {cookie} прокси: 429 только на одном наборе — дело в наборе cookies")
 
 
+def check_port(settings: Settings, port: int, count: int, api_url: str = "") -> None:
+    """Один порт подряд: держит ли туннель и сколько запросов Avito пропускает."""
+    matches = [
+        proxy_string
+        for proxy_string, _ in settings.proxy_endpoints()
+        if proxy_string.endswith(f":{port}")
+    ]
+    print(f"\n=== Порт {port}: {count} попыток ===")
+    if not matches:
+        print("  такого порта нет в PROXY_STRING")
+        return
+    proxy_string = matches[0]
+    slots = usable_slots()
+    if not slots:
+        print("  нет готового набора cookies")
+        return
+    url = api_url or catalog.build_api_url(default_region().slug, catalog.default_category().id)
+    tally: dict[str, int] = {}
+    for attempt in range(count):
+        started = time.monotonic()
+        ip = _current_ip(_proxies(proxy_string), timeout=5.0) or "нет ответа"
+        ip_took = time.monotonic() - started
+        client = build_client(slots[attempt % len(slots)], proxy_string)
+        started = time.monotonic()
+        try:
+            code = _status(client, url)
+        finally:
+            client.close()
+        avito_took = time.monotonic() - started
+        tally[code] = tally.get(code, 0) + 1
+        print(
+            f"  {attempt + 1:>2}. IP {ip} за {ip_took:.1f} с · "
+            f"Avito {code} за {avito_took:.1f} с"
+        )
+        time.sleep(3)
+    summary = ", ".join(f"{code} {total}" for code, total in sorted(tally.items()))
+    print(f"  итого: {summary}")
+
+
 def _current_ip(proxies: dict[str, str], timeout: float = IP_CHECK_TIMEOUT) -> str:
     try:
         return requests.get(IP_URL, proxies=proxies, timeout=timeout).text.strip()
@@ -420,6 +459,8 @@ def main() -> None:
     parser.add_argument(
         "--why429", action="store_true", help="по каждому прокси: 429 с cookies и без"
     )
+    parser.add_argument("--port", type=int, help="проверить один порт прокси подряд")
+    parser.add_argument("--count", type=int, default=10, help="сколько попыток для --port")
     parser.add_argument("--log", metavar="PATH", help="разобрать лог парсера")
     parser.add_argument(
         "--since",
@@ -429,14 +470,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if not any([args.probe, args.api, args.ipchange, args.why429, args.log]):
+    if not any([args.probe, args.api, args.ipchange, args.why429, args.port, args.log]):
         parser.print_help()
         return
 
     # Разбор лога сети не требует, поэтому настройки читаем только при нужде.
     if args.log:
         log_report(args.log, args.since)
-    if not any([args.probe, args.api, args.ipchange, args.why429]):
+    if not any([args.probe, args.api, args.ipchange, args.why429, args.port]):
         return
 
     settings = load_settings()
@@ -448,6 +489,8 @@ def main() -> None:
         ipchange(settings)
     if args.why429:
         why429(settings, args.api_url)
+    if args.port:
+        check_port(settings, args.port, args.count, args.api_url)
 
 
 if __name__ == "__main__":
