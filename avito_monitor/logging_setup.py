@@ -8,13 +8,13 @@ from loguru import logger
 
 from avito_monitor.paths import LOG_DIR
 
-_MAX_AGE_SEC = 86_400  # сутки
+_MAX_AGE_SEC = 7 * 86_400  # неделя: сравнить 429 с прошлыми днями
 _ROTATION = "500 KB"
-_RETENTION = "1 day"
+_RETENTION = "7 days"
 
 
 def prune_logs() -> None:
-    """Удалить файлы логов старше суток.
+    """Удалить файлы логов старше недели.
 
     Loguru чистит только то, что создал сам, — оставшиеся с прошлых запусков
     файлы (например, ``cookie_lifecycle.log``) убираем руками.

@@ -19,6 +19,7 @@ import argparse
 import re
 import statistics
 import time
+import zipfile
 from datetime import datetime
 from itertools import pairwise
 from pathlib import Path
@@ -201,6 +202,67 @@ def why429(settings: Settings, api_url: str = "") -> None:
         print(f"  {cookie} прокси: 429 только на одном наборе — дело в наборе cookies")
 
 
+FRESH_TARGETS = ("chrome131_android", "chrome146")
+"""Свои cookies: тот же отпечаток, что у купленных, и актуальный Chrome."""
+
+
+def _fresh_status(proxy_string: str, url: str, impersonate: str) -> tuple[str, str]:
+    """Как браузер: открыть главную Avito, затем с её cookies — API выдачи."""
+    session = curl_requests.Session(impersonate=impersonate)
+    session.proxies = _proxies(proxy_string)
+    try:
+        home = _status(session, "https://www.avito.ru/")
+        time.sleep(1)
+        session.headers.update(
+            {"accept": "application/json, text/plain, */*", "referer": "https://www.avito.ru/"}
+        )
+        return home, _status(session, url)
+    finally:
+        session.close()
+
+
+def compare_port(settings: Settings, port: int, count: int, api_url: str = "") -> None:
+    """На одном адресе: купленные cookies против своих, старый Chrome против нового.
+
+    Если купленный набор ловит 429, а свой на том же IP проходит, — дело не
+    в адресе, а в cookies или отпечатке.
+    """
+    matches = [p for p, _ in settings.proxy_endpoints() if p.endswith(f":{port}")]
+    print(f"\n=== Порт {port}: купленные cookies против своих, {count} кругов ===")
+    if not matches:
+        print("  такого порта нет в PROXY_STRING")
+        return
+    proxy_string = matches[0]
+    slots = usable_slots()
+    if not slots:
+        print("  нет готового набора cookies")
+        return
+    url = api_url or catalog.build_api_url(default_region().slug, catalog.default_category().id)
+    names = ["купленный"] + [f"свой {target}" for target in FRESH_TARGETS]
+    tally = {name: {} for name in names}
+    for attempt in range(count):
+        ip = _current_ip(_proxies(proxy_string), timeout=5.0) or "?"
+        client = build_client(slots[attempt % len(slots)], proxy_string)
+        try:
+            bought = _status(client, url)
+        finally:
+            client.close()
+        parts = [f"купленный {bought}"]
+        tally["купленный"][bought] = tally["купленный"].get(bought, 0) + 1
+        for target in FRESH_TARGETS:
+            time.sleep(2)
+            home, api_code = _fresh_status(proxy_string, url, target)
+            name = f"свой {target}"
+            tally[name][api_code] = tally[name].get(api_code, 0) + 1
+            parts.append(f"{name}: главная {home}, API {api_code}")
+        print(f"  {attempt + 1:>2}. IP {ip} · " + " · ".join(parts))
+        time.sleep(3)
+    print("  итого по API:")
+    for name in names:
+        summary = ", ".join(f"{code} {total}" for code, total in sorted(tally[name].items()))
+        print(f"    {name}: {summary}")
+
+
 def check_port(settings: Settings, port: int, count: int, api_url: str = "") -> None:
     """Один порт подряд: держит ли туннель и сколько запросов Avito пропускает."""
     matches = [
@@ -323,7 +385,49 @@ def _timestamp(line: str) -> float | None:
     return datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S.%f").timestamp()
 
 
-def log_report(path: str, since: str = "") -> None:
+def _log_lines(file: Path) -> list[str]:
+    """Строки лога вместе с его ротированными архивами, от старых к новым."""
+    lines: list[str] = []
+    # Имя архива содержит время ротации, поэтому сортировка по имени хронологична.
+    for archive in sorted(file.parent.glob(f"{file.stem}.*.log.zip")):
+        try:
+            with zipfile.ZipFile(archive) as bundle:
+                for name in bundle.namelist():
+                    lines += bundle.read(name).decode("utf-8", errors="replace").splitlines()
+        except (OSError, zipfile.BadZipFile):
+            continue
+    lines += file.read_text(encoding="utf-8", errors="replace").splitlines()
+    return lines
+
+
+def _report_by_hour(lines: list[str]) -> None:
+    """По часам: сколько циклов дали выдачу и сколько раз пришёл 429."""
+    hours: dict[str, dict[str, int]] = {}
+    for line in lines:
+        hour = line[:13]
+        if not _TIMESTAMP_RE.match(line):
+            continue
+        if "Получено объявлений" in line:
+            key = "ok"
+        elif "Цикл без объявлений" in line:
+            key = "empty"
+        elif "429: бан по IP" in line:
+            key = "429"
+        else:
+            continue
+        bucket = hours.setdefault(hour, {"ok": 0, "empty": 0, "429": 0})
+        bucket[key] += 1
+    print("\n  По часам (UTC): циклов с выдачей / пустых · строк 429")
+    for hour, bucket in sorted(hours.items()):
+        total = bucket["ok"] + bucket["empty"]
+        share = bucket["ok"] / total * 100 if total else 0
+        print(
+            f"    {hour}:00  с выдачей {bucket['ok']:>3} / пустых {bucket['empty']:>3}"
+            f" ({share:>3.0f}%) · 429 {bucket['429']:>4}"
+        )
+
+
+def log_report(path: str, since: str = "", by_hour: bool = False) -> None:
     """Разобрать лог парсера: период цикла, сбои, возраст объявлений."""
     file = Path(path)
     print(f"\n=== Разбор лога {file} ===")
@@ -331,7 +435,7 @@ def log_report(path: str, since: str = "") -> None:
         print("  файл не найден")
         return
 
-    lines = file.read_text(encoding="utf-8", errors="replace").splitlines()
+    lines = _log_lines(file)
     if since:
         # Лог пишется несколько дней подряд: без отсечки прошлые запуски
         # смешаются с текущим и медианы будут ни о чём.
@@ -340,6 +444,9 @@ def log_report(path: str, since: str = "") -> None:
         if not lines:
             print("  за этот период записей нет")
             return
+    if by_hour:
+        _report_by_hour(lines)
+        return
 
     cycle_starts: list[float] = []
     request_times: list[float] = []
@@ -461,7 +568,15 @@ def main() -> None:
     )
     parser.add_argument("--port", type=int, help="проверить один порт прокси подряд")
     parser.add_argument("--count", type=int, default=10, help="сколько попыток для --port")
-    parser.add_argument("--log", metavar="PATH", help="разобрать лог парсера")
+    parser.add_argument(
+        "--compare",
+        action="store_true",
+        help="с --port: купленные cookies против своих и старый Chrome против нового",
+    )
+    parser.add_argument("--log", metavar="PATH", help="разобрать лог парсера и его архивы")
+    parser.add_argument(
+        "--by-hour", action="store_true", help="с --log: выдача и 429 по часам"
+    )
     parser.add_argument(
         "--since",
         metavar="'YYYY-MM-DD HH:MM'",
@@ -476,7 +591,7 @@ def main() -> None:
 
     # Разбор лога сети не требует, поэтому настройки читаем только при нужде.
     if args.log:
-        log_report(args.log, args.since)
+        log_report(args.log, args.since, args.by_hour)
     if not any([args.probe, args.api, args.ipchange, args.why429, args.port]):
         return
 
@@ -489,7 +604,9 @@ def main() -> None:
         ipchange(settings)
     if args.why429:
         why429(settings, args.api_url)
-    if args.port:
+    if args.port and args.compare:
+        compare_port(settings, args.port, args.count, args.api_url)
+    elif args.port:
         check_port(settings, args.port, args.count, args.api_url)
 
 
