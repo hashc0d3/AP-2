@@ -12,11 +12,31 @@
 from __future__ import annotations
 
 import argparse
+import time
 
 from avito_monitor import spfa
 from avito_monitor.config import load_settings
 from avito_monitor.cookies import pool
 from avito_monitor.net.proxies import PROXY_POOL
+
+
+RATE_LIMIT_WAIT = 65.0
+"""spfa.pro отвечает 429 на частые покупки; через минуту снова продаёт."""
+RATE_LIMIT_RETRIES = 3
+
+
+def _buy_with_wait(settings, proxy_string: str, label: str) -> dict | None:
+    """Купить набор, переждав лимит сервиса, а не пропуская покупку."""
+    for attempt in range(RATE_LIMIT_RETRIES + 1):
+        try:
+            return pool.buy_one(settings, proxy_string=proxy_string)
+        except spfa.SpfaError as err:
+            if "Лимит" not in str(err) or attempt == RATE_LIMIT_RETRIES:
+                print(f"  {label}: не купил — {err}")
+                return None
+            print(f"  {label}: лимит сервиса, жду {RATE_LIMIT_WAIT:.0f} с")
+            time.sleep(RATE_LIMIT_WAIT)
+    return None
 
 
 def main() -> None:
@@ -46,10 +66,8 @@ def main() -> None:
 
     bought = 0
     for number in range(1, count + 1):
-        try:
-            slot = pool.buy_one(settings, proxy_string=proxy_string)
-        except spfa.SpfaError as err:
-            print(f"  {number}/{count}: не купил — {err}")
+        slot = _buy_with_wait(settings, proxy_string, f"{number}/{count}")
+        if slot is None:
             continue
         bought += 1
         print(f"  {number}/{count}: id={slot['id']}")
