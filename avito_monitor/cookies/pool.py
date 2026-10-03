@@ -197,14 +197,17 @@ def import_legacy() -> dict | None:
     return existing
 
 
-def buy_one(settings: Settings, *, pause: bool = True) -> dict:
+def buy_one(settings: Settings, *, pause: bool = True, proxy_string: str = "") -> dict:
     """Купить набор cookies и положить в пул.
 
+    :param proxy_string: через какой прокси сервис оформит набор; пусто —
+        живой канал из пула.
     :raises spfa.SpfaError: сервис не отдал набор.
     """
     logger.info("Покупаю cookies для пула…")
     results = spfa.buy_cookies(
-        settings.cookies_api_key, current_proxy_string(settings.proxy_string)
+        settings.cookies_api_key,
+        proxy_string or current_proxy_string(settings.proxy_string),
     )
 
     fingerprint = results.get("fingerprint") or {}
@@ -325,6 +328,16 @@ def _elapsed_since(timestamp: Any) -> float | None:
 
 
 # ── Выдача и возврат наборов ──────────────────────────────────────────────
+
+
+def retire(cookie_id: Any) -> None:
+    """Вывести набор из работы насовсем: обслуживание удалит его файл."""
+    slot = load_slot(cookie_id)
+    if not slot:
+        return
+    slot["status"] = STATUS_DEAD
+    save_slot(slot)
+    log_lifecycle("retired", cookie_id)
 
 
 def mark_blocked(cookie_id: Any) -> None:

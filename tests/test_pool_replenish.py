@@ -99,3 +99,34 @@ def test_unblock_404_marks_dead_and_frees_slot(settings, monkeypatch) -> None:
     assert dead["status"] == pool.STATUS_DEAD
     assert len(pool.alive_slots()) == 0
 
+
+def test_retire_takes_set_out_of_rotation(settings) -> None:
+    pool.save_slot(
+        {
+            "id": "old-1",
+            "cookies": {"sessid": "x"},
+            "user_agent": "ua",
+            "status": pool.STATUS_READY,
+            "unblock_ok": True,
+        }
+    )
+    assert len(pool.usable_slots()) == 1
+
+    pool.retire("old-1")
+
+    assert pool.usable_slots() == []
+    assert pool.alive_slots() == []
+
+
+def test_buy_one_uses_given_proxy(settings, monkeypatch) -> None:
+    seen = {}
+
+    def fake_buy(api_key, proxy_string):
+        seen["proxy"] = proxy_string
+        return {"id": "new-1", "cookies": {"sessid": "y"}, "user_agent": "ua"}
+
+    monkeypatch.setattr(spfa, "buy_cookies", fake_buy)
+    pool.buy_one(settings, pause=False, proxy_string="u:p@host:23650")
+
+    assert seen["proxy"] == "u:p@host:23650"
+
