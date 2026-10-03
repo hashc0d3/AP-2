@@ -215,6 +215,8 @@ def _fetch_items_parallel(
     throttled = False
     last_status = 0
     any_ok = False
+    json_ids: list[object] = []
+    limited_ids: list[object] = []
 
     batch = ring.next_many(width, skip_proxies=used_proxies)
     if not batch and PROXY_POOL.live_size < 1:
@@ -252,6 +254,7 @@ def _fetch_items_parallel(
                 if not probe.failed:
                     PROXY_POOL.note_ok(probe.proxy)
                     any_ok = True
+                    json_ids.append(probe.cookie_id)
                     groups.append(probe.items)
                     logger.info(
                         f"id={slot.get('id')}: {len(probe.items)} объявлений "
@@ -261,6 +264,8 @@ def _fetch_items_parallel(
                         on_items(probe.items)
                     continue
                 throttled = throttled or probe.throttled
+                if probe.status == net_client.RATE_LIMITED:
+                    limited_ids.append(probe.cookie_id)
                 _apply_probe_failure(ring, probe)
                 logger.warning(
                     f"id={slot.get('id')}: отказ status={probe.status or 'сеть'} "
@@ -273,6 +278,7 @@ def _fetch_items_parallel(
                     logger.info(f"Сразу беру запасной: {_slot_label(ring, spare[0][0])}")
                     launch(spare)
 
+    ring.note_cycle(json_ids, limited_ids)
     if not any_ok:
         return CycleResult(status=last_status, failed=True, throttled=throttled)
 

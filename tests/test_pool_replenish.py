@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import time
+from dataclasses import replace
+
 from avito_monitor import spfa
 from avito_monitor.cookies import pool
 
@@ -116,6 +119,50 @@ def test_retire_takes_set_out_of_rotation(settings) -> None:
 
     assert pool.usable_slots() == []
     assert pool.alive_slots() == []
+
+
+def _ready(cookie_id: str, **extra) -> dict:
+    return pool.save_slot(
+        {
+            "id": cookie_id,
+            "cookies": {"sessid": "x"},
+            "user_agent": "ua",
+            "status": pool.STATUS_READY,
+            "unblock_ok": True,
+            **extra,
+        }
+    )
+
+
+def test_retire_aged_takes_only_the_oldest_set(settings) -> None:
+    now = time.time()
+    _ready("a", bought_at=now - 30 * 3600)
+    _ready("b", bought_at=now - 40 * 3600)
+    _ready("c", bought_at=now - 3600)
+
+    assert pool.retire_aged(settings) == "b"
+    assert {slot["id"] for slot in pool.usable_slots()} == {"a", "c"}
+
+
+def test_retire_aged_stamps_sets_without_purchase_time(settings) -> None:
+    _ready("old")
+    _ready("other")
+
+    assert pool.retire_aged(settings) is None
+    assert pool.load_slot("old")["bought_at"]
+
+
+def test_retire_aged_keeps_the_last_working_set(settings) -> None:
+    _ready("only", bought_at=time.time() - 100 * 3600)
+
+    assert pool.retire_aged(settings) is None
+
+
+def test_retire_aged_off_when_zero(settings) -> None:
+    _ready("a", bought_at=time.time() - 100 * 3600)
+    _ready("b", bought_at=time.time() - 100 * 3600)
+
+    assert pool.retire_aged(replace(settings, cookie_max_age_hours=0)) is None
 
 
 def test_buy_one_uses_given_proxy(settings, monkeypatch) -> None:

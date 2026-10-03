@@ -155,6 +155,59 @@ def test_burned_cookie_leaves_rotation(ring: CookieRing, write_slot, cookies_dir
     assert stored["status"] == pool.STATUS_BLOCKED
 
 
+def test_set_with_429_streak_while_others_get_json_is_retired(
+    ring: CookieRing, write_slot, cookies_dir: Path
+) -> None:
+    for cookie_id in ("311", "312"):
+        write_slot(_slot(cookie_id))
+    ring.refresh()
+
+    for _ in range(CookieRing.STRIKE_LIMIT):
+        ring.note_cycle(["312"], ["311"])
+
+    assert ring.size() == 1
+    stored = json.loads((cookies_dir / "311.json").read_text(encoding="utf-8"))
+    assert stored["status"] == pool.STATUS_DEAD
+
+
+def test_429_without_json_in_cycle_is_not_blamed_on_cookies(ring: CookieRing, write_slot) -> None:
+    """Бан адреса или всей сети — не повод покупать новые наборы."""
+    for cookie_id in ("321", "322"):
+        write_slot(_slot(cookie_id))
+    ring.refresh()
+
+    for _ in range(CookieRing.STRIKE_LIMIT * 2):
+        ring.note_cycle([], ["321", "322"])
+
+    assert ring.size() == 2
+
+
+def test_json_resets_429_streak(ring: CookieRing, write_slot) -> None:
+    for cookie_id in ("331", "332"):
+        write_slot(_slot(cookie_id))
+    ring.refresh()
+
+    for _ in range(CookieRing.STRIKE_LIMIT - 1):
+        ring.note_cycle(["332"], ["331"])
+    ring.note_cycle(["331"], [])
+    for _ in range(CookieRing.STRIKE_LIMIT - 1):
+        ring.note_cycle(["332"], ["331"])
+
+    assert ring.size() == 2
+
+
+def test_retirement_is_capped_per_hour(ring: CookieRing, write_slot) -> None:
+    ids = [str(900 + n) for n in range(CookieRing.RETIRE_PER_HOUR + 2)]
+    for cookie_id in [*ids, "999"]:
+        write_slot(_slot(cookie_id))
+    ring.refresh()
+
+    for _ in range(CookieRing.STRIKE_LIMIT):
+        ring.note_cycle(["999"], ids)
+
+    assert ring.size() == len(ids) + 1 - CookieRing.RETIRE_PER_HOUR
+
+
 def test_reissued_cookies_force_new_client(ring: CookieRing, write_slot) -> None:
     """Сервис перевыпустил cookies — старый клиент держит недействительные."""
     now = time.time()

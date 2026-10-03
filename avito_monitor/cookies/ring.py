@@ -39,6 +39,12 @@ class CookieRing:
     CLIENT_MAX_AGE = 300.0
     """Максимальный срок жизни соединения на один набор."""
 
+    STRIKE_LIMIT = 5
+    """Столько 429 подряд, пока другие наборы получали JSON, — и набор засвечен."""
+
+    RETIRE_PER_HOUR = 6
+    """Больше за час не выводим: при бане всей сети иначе скупим пул заново."""
+
     def __init__(self, settings: Settings) -> None:
         self._fallback_proxy = settings.proxy_string
         """Прокси на случай, если пул ещё не настроен."""
@@ -51,6 +57,8 @@ class CookieRing:
         self._refreshed_at = 0.0
         self._used_at: dict[str, float] = {}
         """Когда набор последний раз ушёл в запрос: внутри канала берём самый отдохнувший."""
+        self._strikes: dict[str, int] = {}
+        self._retired_at: list[float] = []
 
     # ── Состав кольца ───────────────────────────────────────────────────
 
@@ -128,8 +136,36 @@ class CookieRing:
 
     def burn(self, cookie_id: object) -> None:
         """Убрать сгоревший набор из кольца и отдать его на разблокировку."""
-        key = str(cookie_id)
         pool.mark_blocked(cookie_id)
+        self._drop(str(cookie_id))
+
+    def note_cycle(self, json_ids: list[object], limited_ids: list[object]) -> None:
+        """Итог параллельного цикла для счёта засвеченных наборов.
+
+        429 засчитывается набору, только если в том же цикле другой набор
+        получил JSON: так бан адреса или всей сети не выдаётся за вину cookies.
+        """
+        for cookie_id in json_ids:
+            self._strikes.pop(str(cookie_id), None)
+        if not json_ids:
+            return
+        for cookie_id in limited_ids:
+            key = str(cookie_id)
+            self._strikes[key] = self._strikes.get(key, 0) + 1
+            if self._strikes[key] >= self.STRIKE_LIMIT:
+                self._retire(key)
+
+    def _retire(self, key: str) -> None:
+        now = time.time()
+        self._retired_at = [at for at in self._retired_at if now - at < 3600]
+        if len(self._retired_at) >= self.RETIRE_PER_HOUR:
+            return
+        self._retired_at.append(now)
+        pool.retire(key, f"{self._strikes[key]} раз 429 подряд, пока другие получали JSON")
+        self._strikes.pop(key, None)
+        self._drop(key)
+
+    def _drop(self, key: str) -> None:
         self._close(key)
         PROXY_POOL.release(key)
         self._slots.pop(key, None)

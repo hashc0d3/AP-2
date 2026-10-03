@@ -92,6 +92,8 @@ class Settings:
     # ── Пул cookies ─────────────────────────────────────────────────────
     cookie_pool_size: int = 24
     cookie_unblock_pause: int = 60
+    cookie_max_age_hours: float = 24.0
+    """Набор старше этого заменяется новым; 0 — не заменять по возрасту."""
 
     # ── Веб-интерфейс ───────────────────────────────────────────────────
     web_port: int = 8765
@@ -119,6 +121,7 @@ class Settings:
         object.__setattr__(self, "ip_change_wait", max(1.0, self.ip_change_wait))
         object.__setattr__(self, "cookie_pool_size", max(1, self.cookie_pool_size))
         object.__setattr__(self, "cookie_unblock_pause", max(30, self.cookie_unblock_pause))
+        object.__setattr__(self, "cookie_max_age_hours", max(0.0, self.cookie_max_age_hours))
         # Список моделей приходит и из config.toml, и из интерфейса. Приводим к
         # одному виду здесь, чтобы дальше по коду встречались только известные id.
         object.__setattr__(self, "iphone_models", iphone.normalize_models(self.iphone_models))

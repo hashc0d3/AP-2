@@ -227,6 +227,7 @@ def buy_one(settings: Settings, *, pause: bool = True, proxy_string: str = "") -
             "fingerprint": fingerprint,
             "mobile": results.get("mobile", True),
             "status": STATUS_READY,
+            "bought_at": now,
             "last_unblock_at": now,
             "unblock_ok": True,
         }
@@ -330,14 +331,43 @@ def _elapsed_since(timestamp: Any) -> float | None:
 # ── Выдача и возврат наборов ──────────────────────────────────────────────
 
 
-def retire(cookie_id: Any) -> None:
+def retire(cookie_id: Any, reason: str = "") -> None:
     """Вывести набор из работы насовсем: обслуживание удалит его файл."""
     slot = load_slot(cookie_id)
     if not slot:
         return
     slot["status"] = STATUS_DEAD
     save_slot(slot)
-    log_lifecycle("retired", cookie_id)
+    log_lifecycle("retired", cookie_id, reason=reason.replace(" ", "_"))
+    if reason:
+        logger.info(f"Пул: id={cookie_id} выведен из работы — {reason}")
+
+
+def retire_aged(settings: Settings) -> Any:
+    """Вывести самый старый набор, если он старше ``cookie_max_age_hours``.
+
+    Не больше одного за круг обслуживания: наборы куплены пачкой и состарятся
+    одновременно, а покупка у сервиса ограничена по частоте. Возвращает id
+    выведенного набора или ``None``.
+    """
+    max_age = settings.cookie_max_age_hours * 3600
+    if max_age <= 0:
+        return None
+    now = time.time()
+    aged = []
+    for slot in alive_slots():
+        if not slot.get("bought_at"):
+            slot["bought_at"] = now
+            save_slot(slot)
+            continue
+        age = now - float(slot["bought_at"])
+        if age > max_age:
+            aged.append((age, slot))
+    if not aged or len(usable_slots()) < 2:
+        return None
+    age, oldest = max(aged, key=lambda pair: pair[0])
+    retire(oldest["id"], f"старше {settings.cookie_max_age_hours:g} ч ({age / 3600:.1f} ч)")
+    return oldest["id"]
 
 
 def mark_blocked(cookie_id: Any) -> None:
@@ -416,7 +446,8 @@ def wait_ready_cookie(
 
 
 def maintain(settings: Settings) -> None:
-    """Один круг обслуживания: докупить, разблокировать, добить до размера."""
+    """Один круг обслуживания: заменить старый, докупить, разблокировать, добить до размера."""
+    retire_aged(settings)
     ensure_pool(settings)
     empty = not usable_slots()
     for slot in list_slots():
