@@ -515,6 +515,22 @@ def test_foreign_host_is_refused(
     assert response.status_code == 403
 
 
+def test_metrics_require_login(client: requests.Session, base_url: str) -> None:
+    assert client.get(f"{base_url}/api/metrics", timeout=5).status_code == 403
+
+
+def test_metrics_snapshot_for_signed_in(
+    signed_in: requests.Session, base_url: str
+) -> None:
+    response = signed_in.get(f"{base_url}/api/metrics", timeout=5)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["cycles"] == 0
+    assert "requests" in payload
+    assert "proxies" in payload
+    assert "cookies" in payload
+
+
 def test_local_host_is_always_allowed(
     client: requests.Session, base_url: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:

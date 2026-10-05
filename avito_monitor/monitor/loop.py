@@ -32,6 +32,7 @@ from avito_monitor.avito import items as items_mod
 from avito_monitor.avito.regions import region_timezone
 from avito_monitor.config import Settings, load_settings
 from avito_monitor.cookies.ring import CookieRing
+from avito_monitor.metrics import METRICS
 from avito_monitor.monitor.pacer import PollPacer, next_interval, parallel_width
 from avito_monitor.monitor.seen import SeenStore
 from avito_monitor.net import client as net_client
@@ -187,6 +188,25 @@ def _apply_probe_failure(ring: CookieRing, probe: _Probe) -> None:
         PROXY_POOL.ban(probe.proxy, "429: бан по IP", wait=False)
 
 
+def _observe_probe(probe: _Probe) -> None:
+    """Записать исход одного запроса, не меняя решения цикла."""
+    if not probe.failed:
+        kind = "json"
+    elif probe.cookie_blocked and probe.status in net_client.COOKIE_BLOCKED:
+        kind = str(probe.status)
+    elif probe.timed_out:
+        kind = "timeout"
+    elif probe.dropped:
+        kind = "drop"
+    elif probe.antibot:
+        kind = "antibot"
+    elif probe.status == net_client.RATE_LIMITED:
+        kind = "429"
+    else:
+        kind = "other"
+    METRICS.note_request(probe.proxy, kind, status=probe.status, cookie_id=probe.cookie_id)
+
+
 def _proxy_label(proxy: str) -> str:
     return proxy.rsplit("@", 1)[-1] or "без прокси"
 
@@ -250,6 +270,7 @@ def _fetch_items_parallel(
             for future in done:
                 slot = pending.pop(future)
                 probe = future.result()
+                _observe_probe(probe)
                 last_status = probe.status or last_status
                 if not probe.failed:
                     PROXY_POOL.note_ok(probe.proxy)
@@ -343,8 +364,10 @@ def fetch_items(
     except RequestException as err:
         hung = _is_timeout(err) and not PROXY_POOL.note_hang(ring.proxy_of(slot))
         if hung:
+            METRICS.note_request(ring.proxy_of(slot), "timeout", cookie_id=slot.get("id"))
             logger.warning("Прокси не ответил вовремя, IP не меняю")
             return CycleResult(failed=True)
+        METRICS.note_request(ring.proxy_of(slot), "drop", cookie_id=slot.get("id"))
         if rotate("Прокси сбросил соединение, переключаюсь", rotate_ip=True):
             try:
                 status, payload = _fetch_page(client, url, page_timeout)
@@ -356,12 +379,14 @@ def fetch_items(
 
     if status == net_client.RATE_LIMITED:
         result.throttled = True
+        METRICS.note_request(ring.proxy_of(slot), "429", status=status, cookie_id=slot.get("id"))
         PROXY_POOL.ban(ring.proxy_of(slot), "429: бан по IP")
         return CycleResult(status=status, failed=True, throttled=True)
 
     if status in net_client.COOKIE_BLOCKED:
         result.throttled = True
         burned = slot.get("id")
+        METRICS.note_request(ring.proxy_of(slot), str(status), status=status, cookie_id=burned)
         ring.burn(burned)
         logger.warning(f"{status}: cookie id={burned} сгорел, IP не меняю, беру другой набор")
         slot, client = ring.next()
@@ -375,6 +400,7 @@ def fetch_items(
 
     if not payload and status == 200:
         result.throttled = True
+        METRICS.note_request(ring.proxy_of(slot), "antibot", status=status, cookie_id=slot.get("id"))
         if not rotate("200 без JSON — антибот вместо API, переключаюсь"):
             return CycleResult(status=status, failed=True, throttled=True)
         status, payload = _fetch_page(client, url, page_timeout)
@@ -387,6 +413,7 @@ def fetch_items(
     items = items_mod.extract_items(payload)
     logger.info(f"Получено из JSON: {len(items)} объявлений")
     result.items = items
+    METRICS.note_request(ring.proxy_of(slot), "json", status=status, cookie_id=slot.get("id"))
     PROXY_POOL.note_ok(ring.proxy_of(slot))
     if on_items and items:
         on_items(items)
@@ -447,6 +474,7 @@ def run_cycle(
     logger.info(f"Получено объявлений: {len(result.items)}")
     json_ages = [age for age in (items_mod.age_seconds(item) for item in result.items) if age is not None]
     if json_ages:
+        METRICS.note_json_age(min(json_ages), max(json_ages))
         logger.info(f"В JSON свежее {min(json_ages)} сек, старше {max(json_ages)} сек")
     if on_selected is None:
         _log_selection(selected, last_stats, first_run=first_run, immediate=False)
@@ -516,7 +544,7 @@ def _monitor_search(settings: Settings, ring: CookieRing, seen: SeenStore, gener
         throttled = False
 
         try:
-            _, failed, throttled = run_cycle(
+            selected, failed, throttled = run_cycle(
                 runtime,
                 ring,
                 seen,
@@ -531,8 +559,10 @@ def _monitor_search(settings: Settings, ring: CookieRing, seen: SeenStore, gener
             # Любая неожиданная ошибка не должна останавливать мониторинг.
             # IP не меняем: он тут обычно ни при чём, а вот соединения после
             # такого сбоя лучше считать мёртвыми.
+            selected = []
             failed = True
             logger.error(f"Ошибка цикла: {err}")
+            METRICS.note_event("error", f"Ошибка цикла: {err}")
             ring.reset_clients()
 
         # Смешанный цикл (JSON с одного канала, 429 с другого) — успех:
@@ -551,8 +581,17 @@ def _monitor_search(settings: Settings, ring: CookieRing, seen: SeenStore, gener
             retry_pause=runtime.retry_pause,
         )
         wait = max(0.0, target - (time.monotonic() - started))
+        elapsed = time.monotonic() - started
+        METRICS.note_cycle(
+            seconds=elapsed,
+            failed=failed,
+            throttled=throttled,
+            new_ads=len(selected),
+            pace=pacer.interval,
+            cookie_sets=ring.size(),
+        )
         logger.info(
-            f"Цикл {time.monotonic() - started:.1f} с, пауза {wait:.1f} с, "
+            f"Цикл {elapsed:.1f} с, пауза {wait:.1f} с, "
             f"темп {pacer.interval:.1f} с, наборов {ring.size()}"
         )
         if wait:

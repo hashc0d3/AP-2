@@ -92,8 +92,14 @@ class Settings:
     # ── Пул cookies ─────────────────────────────────────────────────────
     cookie_pool_size: int = 24
     cookie_unblock_pause: int = 60
-    cookie_max_age_hours: float = 24.0
-    """Набор старше этого заменяется новым; 0 — не заменять по возрасту."""
+    cookie_max_age_hours: float = 12.0
+    """Набор старше этого заменяется новым; 0 — не заменять по возрасту.
+
+    12 часов — предел spfa.pro: дальше набор нельзя ни использовать, ни
+    разблокировать (ответ 410).
+    """
+    cookie_refresh_hours: float = 11.5
+    """За сколько часов до предела выкупать весь пул заново. 0 — не выкупать пачкой."""
 
     # ── Веб-интерфейс ───────────────────────────────────────────────────
     web_port: int = 8765
@@ -122,6 +128,7 @@ class Settings:
         object.__setattr__(self, "cookie_pool_size", max(1, self.cookie_pool_size))
         object.__setattr__(self, "cookie_unblock_pause", max(30, self.cookie_unblock_pause))
         object.__setattr__(self, "cookie_max_age_hours", max(0.0, self.cookie_max_age_hours))
+        object.__setattr__(self, "cookie_refresh_hours", max(0.0, self.cookie_refresh_hours))
         # Список моделей приходит и из config.toml, и из интерфейса. Приводим к
         # одному виду здесь, чтобы дальше по коду встречались только известные id.
         object.__setattr__(self, "iphone_models", iphone.normalize_models(self.iphone_models))

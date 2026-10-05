@@ -121,6 +121,12 @@ def _status(request: Request) -> Response:
     return Response(payload=SESSION.snapshot() | {"auth": auth.auth_status(request.token)})
 
 
+def _metrics(_: Request) -> Response:
+    from avito_monitor.metrics import METRICS
+
+    return Response(payload=METRICS.snapshot())
+
+
 def _categories(_: Request) -> Response:
     return Response(payload=catalog.list_categories())
 
@@ -254,6 +260,7 @@ ROUTES: dict[tuple[str, str], Route] = {
     ("POST", "/api/auth/login"): Route(_login, requires_auth=False),
     ("POST", "/api/auth/logout"): Route(_logout, requires_auth=False),
     ("GET", "/api/ads"): Route(_ads),
+    ("GET", "/api/metrics"): Route(_metrics),
     ("GET", "/api/seller-blacklist"): Route(_get_seller_blacklist),
     ("GET", "/api/avito/session"): Route(_avito_session),
     ("GET", "/api/resource/balance"): Route(_resource_balance),

@@ -9,8 +9,8 @@
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
   <title>Сигнал — мониторинг Avito</title>
-  <script type="module" crossorigin src="/assets/index-BOuoh_gP.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-DgEtWraE.css">
+  <script type="module" crossorigin src="/assets/index-C17pJ29_.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-DIFpFWUD.css">
 </head>
 <body class="auth-gate">
   <header class="site-header">
@@ -23,6 +23,9 @@
           </span>
           <button type="button" class="header-filters-btn" id="filters-open-btn" aria-expanded="false" aria-controls="filters-drawer">
             Фильтры
+          </button>
+          <button type="button" class="header-filters-btn" id="system-open-btn" aria-pressed="false" aria-controls="system">
+            Система
           </button>
         </div>
         <div class="shell-user hidden" id="shell-user">
@@ -378,6 +381,16 @@
   <div id="app" class="hidden page-section">
     <main id="feed" class="wrap feed feed-empty">
       <div class="empty">Настройте фильтр для поиска</div>
+    </main>
+    <main id="system" class="wrap system-page hidden">
+      <div class="system-head">
+        <div>
+          <h1 class="system-title">Система</h1>
+          <p class="hint" id="system-updated">Замеры появятся после цикла поиска</p>
+        </div>
+        <button type="button" class="btn-soft" id="system-back">К ленте</button>
+      </div>
+      <div id="system-body"></div>
     </main>
   </div>
 

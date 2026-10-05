@@ -3,6 +3,7 @@ import { initTheme } from "./theme";
 import { api } from "./api";
 import { mountMonitor } from "./monitor";
 import { mountUserMenu } from "./user-menu";
+import { mountSystem } from "./system";
 import "./styles.css";
 
 initTheme();
@@ -19,6 +20,16 @@ const monitor = mountMonitor({
 });
 monitorRef = monitor;
 
+const system = mountSystem();
+const systemBtn = document.getElementById("system-open-btn") as HTMLButtonElement;
+systemBtn.addEventListener("click", () => {
+  monitor.closeFilters();
+  userMenuRef?.close();
+  system.toggle();
+  systemBtn.classList.toggle("active", system.isOpen());
+  systemBtn.setAttribute("aria-pressed", system.isOpen() ? "true" : "false");
+});
+
 userMenuRef = mountUserMenu({
   onAvitoClick: () => monitorRef?.openAvito(),
   onLogout: () => {
@@ -27,6 +38,9 @@ userMenuRef = mountUserMenu({
       shellAppTools.classList.add("hidden");
       app.classList.add("hidden");
       monitor.closeFilters();
+      system.stop();
+      systemBtn.classList.remove("active");
+      systemBtn.setAttribute("aria-pressed", "false");
       showAuth();
     });
   },

@@ -16,6 +16,7 @@ import type {
   SearchMode,
   SearchState,
   SpfaBalance,
+  SystemMetrics,
 } from "./types";
 
 /** Обычный запрос: сервер отвечает из памяти. */
@@ -194,4 +195,6 @@ export const api = {
 
   // ── Баланс сервиса cookies ──────────────────────────────────────────
   resourceBalance: (): Promise<SpfaBalance> => request("/api/resource/balance"),
+
+  metrics: (): Promise<SystemMetrics> => request("/api/metrics"),
 };

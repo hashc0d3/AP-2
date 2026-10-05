@@ -165,6 +165,78 @@ def test_retire_aged_off_when_zero(settings) -> None:
     assert pool.retire_aged(replace(settings, cookie_max_age_hours=0)) is None
 
 
+def test_unblock_skips_set_older_than_twelve_hours(settings, monkeypatch) -> None:
+    """После 12 часов spfa.pro набор уже не восстановит — в сервис его не шлём."""
+    _ready("aged", status=pool.STATUS_BLOCKED, bought_at=time.time() - 12 * 3600 - 5)
+    called = {"n": 0}
+
+    def fake_unblock(*_a, **_k):
+        called["n"] += 1
+        raise AssertionError("старый набор не должен уходить на разблокировку")
+
+    monkeypatch.setattr(spfa, "unblock_cookies", fake_unblock)
+    assert pool.unblock_one(pool.load_slot("aged"), settings) is None
+    assert called["n"] == 0
+    assert pool.load_slot("aged")["status"] == pool.STATUS_DEAD
+
+
+def test_refresh_waits_while_the_pool_is_young(settings, monkeypatch) -> None:
+    _ready("young", bought_at=time.time() - 2 * 3600)
+    monkeypatch.setattr(pool, "_buy_for_refresh", lambda _settings: (_ for _ in ()).throw(AssertionError("рано")))
+
+    pool.refresh_pool_if_due(settings)
+
+    assert pool.load_slot("young")["status"] == pool.STATUS_READY
+    assert "refresh_retire_ids" not in pool._load_pool()
+
+
+def test_refresh_replaces_the_whole_pool_before_twelve_hours(settings, monkeypatch) -> None:
+    now = time.time()
+    _ready("old-a", bought_at=now - 11.6 * 3600)
+    _ready("old-b", bought_at=now - 11.6 * 3600)
+    issued = {"n": 0}
+
+    def fake_buy(_settings):
+        issued["n"] += 1
+        return _ready(f"new-{issued['n']}", bought_at=time.time())
+
+    monkeypatch.setattr(pool, "_buy_for_refresh", fake_buy)
+    pool.refresh_pool_if_due(settings)
+
+    assert issued["n"] == settings.cookie_pool_size
+    assert pool.load_slot("old-a")["status"] == pool.STATUS_DEAD
+    assert pool.load_slot("old-b")["status"] == pool.STATUS_DEAD
+    assert len(pool.usable_slots()) == settings.cookie_pool_size
+    meta = pool._load_pool()
+    assert "refresh_retire_ids" not in meta
+    assert time.time() - float(meta["refreshed_at"]) < 5
+
+
+def test_refresh_keeps_old_sets_until_the_new_pool_is_complete(settings, monkeypatch) -> None:
+    _ready("old-a", bought_at=time.time() - 11.6 * 3600)
+    _ready("old-b", bought_at=time.time() - 11.6 * 3600)
+
+    def fail_buy(_settings):
+        raise spfa.SpfaError("сервис недоступен")
+
+    monkeypatch.setattr(pool, "buy_one", fail_buy)
+    pool.refresh_pool_if_due(settings)
+
+    assert pool.load_slot("old-a")["status"] == pool.STATUS_READY
+    assert pool.load_slot("old-b")["status"] == pool.STATUS_READY
+    assert pool._load_pool()["refresh_retire_ids"] == ["old-a", "old-b"]
+
+
+def test_cursor_save_keeps_refresh_mark(settings) -> None:
+    _ready("keep", bought_at=time.time())
+    pool._save_pool({"refreshed_at": 123.0, "cursor": "keep"})
+
+    pool._save_cursor("keep")
+
+    assert pool._load_pool()["refreshed_at"] == 123.0
+    assert pool._load_pool()["cursor"] == "keep"
+
+
 def test_buy_one_uses_given_proxy(settings, monkeypatch) -> None:
     seen = {}
 

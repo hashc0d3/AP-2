@@ -45,6 +45,53 @@ export type AvitoPhoneResult = {
   fields?: string[];
 };
 
+/** Снимок GET /api/metrics: счётчики с запуска процесса и живое состояние. */
+export type SystemMetrics = {
+  started_at: number;
+  now: number;
+  requests: Record<string, number>;
+  cycles: number;
+  cycles_ok: number;
+  cycles_failed: number;
+  cycles_throttled: number;
+  new_ads: number;
+  pace_sec: number;
+  cookie_sets: number;
+  last_cycle_sec: number | null;
+  cycle_median_sec: number | null;
+  json_age_min_sec: number | null;
+  json_age_max_sec: number | null;
+  events: { at: number; proxy: string; kind: string; text: string }[];
+  proxies: {
+    label: string;
+    ip: string;
+    prefix: string;
+    changing: boolean;
+    available: boolean;
+    cooldown_sec: number;
+    strikes: number;
+    bans: number;
+    hangs: number;
+    leases: number;
+    requests: Record<string, number>;
+  }[];
+  cookies: {
+    counts: { ready: number; in_use: number; blocked: number; dead: number };
+    usable: number;
+    oldest_hours: number | null;
+    youngest_hours: number | null;
+    blocked: { id: string | number; blocked_sec: number | null; age_hours: number | null }[];
+  };
+  search: {
+    running: boolean;
+    query: string;
+    region: string;
+    category: string;
+    error: string;
+    started_at: number;
+  };
+};
+
 /** Баланс сервиса cookies. */
 export type SpfaBalance = {
   success?: boolean;

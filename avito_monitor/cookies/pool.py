@@ -128,14 +128,35 @@ def usable_slots(exclude: Any = None) -> list[dict]:
     ]
 
 
+# spfa.pro забывает набор через 12 часов: и запрос, и разблокировка после этого
+# бесполезны (ответ 410). Пачку меняем раньше, см. cookie_refresh_hours.
+SPFA_COOKIE_LIFE_HOURS = 12.0
+
+_REFRESH_RATE_WAIT = 65.0
+"""spfa.pro отвечает 429 на частые покупки; через минуту снова продаёт."""
+_REFRESH_RATE_RETRIES = 3
+
+
+def _load_pool() -> dict:
+    data = _read_json(POOL_PATH) or {}
+    return data
+
+
+def _save_pool(data: dict) -> None:
+    _write_json(POOL_PATH, data)
+
+
 def _load_cursor() -> Any:
     """Последний выданный набор — чтобы ротация шла по кругу между запусками."""
-    data = _read_json(POOL_PATH) or {}
+    data = _load_pool()
     return data.get("cursor") or data.get("active_id")
 
 
 def _save_cursor(cookie_id: Any) -> None:
-    _write_json(POOL_PATH, {"active_id": cookie_id, "cursor": cookie_id})
+    data = _load_pool()
+    data["active_id"] = cookie_id
+    data["cursor"] = cookie_id
+    _save_pool(data)
 
 
 def pool_size(settings: Settings) -> int:
@@ -266,14 +287,30 @@ def ensure_pool(settings: Settings) -> list[dict]:
     return alive_slots()
 
 
+def too_old_to_restore(slot: dict) -> bool:
+    """spfa.pro уже не вернёт этот набор: с покупки прошло 12 часов."""
+    bought_at = slot.get("bought_at")
+    if not bought_at:
+        return False
+    try:
+        age = time.time() - float(bought_at)
+    except (TypeError, ValueError):
+        return False
+    return age >= SPFA_COOKIE_LIFE_HOURS * 3600
+
+
 def unblock_one(slot: dict, settings: Settings) -> dict | None:
     """Попросить сервис переоформить набор.
 
     ``None`` — не получилось; набор останется заблокированным до следующего
-    круга обслуживания.
+    круга обслуживания. Набор старше 12 часов не отправляем: сервис его
+    уже не восстановит.
     """
     cookie_id = slot.get("id")
     if not cookie_id:
+        return None
+    if too_old_to_restore(slot):
+        retire(cookie_id, "старше 12 ч, сервис уже не восстановит")
         return None
     logger.info(f"Пул: разблокирую id={cookie_id}")
 
@@ -445,8 +482,92 @@ def wait_ready_cookie(
     return next_cookie(exclude)
 
 
+def _buy_for_refresh(settings: Settings) -> dict | None:
+    """Купить один набор для плановой замены. ``None`` — сервис не отдал."""
+    for attempt in range(_REFRESH_RATE_RETRIES + 1):
+        try:
+            return buy_one(settings)
+        except spfa.SpfaError as err:
+            limited = "Лимит" in str(err)
+            if not limited or attempt == _REFRESH_RATE_RETRIES:
+                logger.warning(f"Плановая покупка не удалась: {err}")
+                return None
+            logger.info("Сервис ограничил частоту покупок, жду минуту")
+            time.sleep(_REFRESH_RATE_WAIT)
+    return None
+
+
+def refresh_pool_if_due(settings: Settings) -> None:
+    """Выкупить весь пул заново до того, как spfa.pro забудет старые наборы.
+
+    Старые id уходят из работы только после того, как новый пул собран целиком.
+    Недокупленная пачка добирается на следующих кругах.
+    """
+    hours = settings.cookie_refresh_hours
+    if hours <= 0:
+        return
+    if hours >= SPFA_COOKIE_LIFE_HOURS:
+        hours = SPFA_COOKIE_LIFE_HOURS - 0.5
+    interval = hours * 3600
+
+    meta = _load_pool()
+    pending = meta.get("refresh_retire_ids")
+    if not isinstance(pending, list) or not pending:
+        refreshed_at = meta.get("refreshed_at")
+        if refreshed_at is None:
+            oldest = None
+            for slot in alive_slots():
+                bought_at = slot.get("bought_at")
+                try:
+                    bought = float(bought_at)
+                except (TypeError, ValueError):
+                    continue
+                oldest = bought if oldest is None else min(oldest, bought)
+            meta["refreshed_at"] = time.time() if oldest is None else oldest
+            _save_pool(meta)
+            refreshed_at = meta["refreshed_at"]
+        try:
+            age = time.time() - float(refreshed_at)
+        except (TypeError, ValueError):
+            age = interval
+        if age < interval:
+            return
+        pending = [slot.get("id") for slot in alive_slots() if slot.get("id") is not None]
+        if not pending:
+            meta["refreshed_at"] = time.time()
+            _save_pool(meta)
+            return
+        meta["refresh_retire_ids"] = pending
+        _save_pool(meta)
+        logger.info(
+            f"Пул: плановая замена, выкупаю {pool_size(settings)} новых "
+            f"до предела в 12 ч"
+        )
+
+    old_ids = {str(cookie_id) for cookie_id in pending}
+    target = pool_size(settings)
+    while sum(1 for slot in alive_slots() if str(slot.get("id")) not in old_ids) < target:
+        bought = _buy_for_refresh(settings)
+        if bought is None:
+            have = sum(1 for slot in alive_slots() if str(slot.get("id")) not in old_ids)
+            logger.warning(
+                f"Пул: плановая замена остановилась на {have} из {target}, "
+                f"старые наборы остаются в работе"
+            )
+            return
+
+    for cookie_id in pending:
+        retire(cookie_id, "плановая замена до 12 ч")
+    meta = _load_pool()
+    meta.pop("refresh_retire_ids", None)
+    meta["refreshed_at"] = time.time()
+    _save_pool(meta)
+    logger.info(f"Пул: плановая замена готова, старых выведено {len(pending)}")
+
+
 def maintain(settings: Settings) -> None:
     """Один круг обслуживания: заменить старый, докупить, разблокировать, добить до размера."""
+    refresh_pool_if_due(settings)
     retire_aged(settings)
     ensure_pool(settings)
     empty = not usable_slots()

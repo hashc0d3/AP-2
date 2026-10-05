@@ -111,7 +111,11 @@ def run_loop(settings: Settings | None = None) -> None:
     settings = settings or load_settings()
     pause = settings.cookie_unblock_pause
     _claim_pid()
-    logger.info(f"Сервис пула cookies: размер {pool.pool_size(settings)}, пауза {pause} с")
+    refresh = settings.cookie_refresh_hours
+    logger.info(
+        f"Сервис пула cookies: размер {pool.pool_size(settings)}, пауза {pause} с, "
+        f"полная замена каждые {refresh:g} ч"
+    )
     try:
         while True:
             try:
@@ -120,6 +124,9 @@ def run_loop(settings: Settings | None = None) -> None:
                 # Сеть и сервис могут отваливаться — сервис обслуживания
                 # должен переживать это и пробовать снова.
                 logger.error(f"Ошибка цикла пула: {err}")
+                from avito_monitor.metrics import METRICS
+
+                METRICS.note_event("error", f"Ошибка пула cookies: {err}")
             time.sleep(pause)
     finally:
         _release_pid()

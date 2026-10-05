@@ -183,6 +183,30 @@ class ProxyPool:
                 return False
             time.sleep(0.2)
 
+    def snapshot(self) -> list[dict]:
+        """Состояние каналов для страницы мониторинга, без логина и ссылки смены IP."""
+        now = time.monotonic()
+        with self._lock:
+            rows = []
+            for channel in self._channels:
+                cooling = max(0.0, channel.cooling_until - now) if channel.cooling_until else 0.0
+                resting = bool(channel.cooling_until and now < channel.cooling_until)
+                rows.append(
+                    {
+                        "label": channel.label,
+                        "ip": channel.last_ip,
+                        "prefix": ip_prefix21(channel.last_ip) if channel.last_ip else "",
+                        "changing": channel.changing,
+                        "available": not channel.changing and not resting,
+                        "cooldown_sec": round(cooling, 1),
+                        "strikes": channel.strikes,
+                        "bans": channel.bans,
+                        "hangs": channel.hangs,
+                        "leases": channel.leases,
+                    }
+                )
+            return rows
+
     def note_ok(self, proxy_string: str) -> None:
         """Канал отдал ответ — сбрасываем серию 429 и таймаутов."""
         if not proxy_string:

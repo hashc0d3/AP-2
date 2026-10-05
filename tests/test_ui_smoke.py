@@ -150,6 +150,21 @@ def test_app_appears_after_login(ui: Ui) -> None:
     assert ui.errors() == []
 
 
+def test_system_page_shows_measurements(ui: Ui) -> None:
+    ui.sign_in()
+    ui.page.click("#system-open-btn")
+    ui.page.wait_for_selector("#system:not(.hidden)", timeout=10000)
+    ui.page.wait_for_selector(".system-card", timeout=10000)
+    text = ui.page.inner_text("#system").casefold()
+    assert ui.page.locator(".system-card").count() == 6
+    assert "поиск" in text
+    assert "прокси" in text
+    assert "json" in text
+    ui.page.click("#system-back")
+    ui.page.wait_for_selector("#feed:not(.hidden)", timeout=10000)
+    assert ui.errors() == []
+
+
 def test_session_survives_reload(ui: Ui) -> None:
     """Cookie сессии должна возвращать в приложение без повторного входа."""
     ui.sign_in()

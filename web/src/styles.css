@@ -2715,3 +2715,144 @@ body.auth-gate .auth-screen-card {
     justify-content: center;
   }
 }
+
+.system-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-block: 1rem 2rem;
+}
+
+.system-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.system-title {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 650;
+}
+
+.system-error {
+  color: #f87171;
+}
+
+.system-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.75rem;
+}
+
+.system-card,
+.system-panel {
+  border: 1px solid var(--color-edge);
+  border-radius: 0.9rem;
+  background: var(--color-surface);
+  padding: 0.9rem 1rem;
+}
+
+.system-card-title,
+.system-panel h2 {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.system-card-value {
+  margin: 0.35rem 0 0;
+  font-size: 1.35rem;
+  font-weight: 650;
+}
+
+.system-card-hint,
+.system-sub {
+  display: block;
+  margin: 0.3rem 0 0;
+  color: var(--color-muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.system-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.system-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.system-count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-edge);
+  background: var(--color-raised);
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+}
+
+.system-count.kind-429,
+.system-count.kind-403,
+.system-count.kind-439 {
+  color: #f87171;
+}
+
+.system-count.kind-json {
+  color: var(--color-money);
+}
+
+.system-table-wrap {
+  overflow-x: auto;
+}
+
+.system-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.system-table th,
+.system-table td {
+  padding: 0.55rem 0.4rem;
+  border-bottom: 1px solid var(--color-edge);
+  text-align: left;
+  vertical-align: top;
+}
+
+.system-table th {
+  color: var(--color-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.system-events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.system-events li {
+  display: flex;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.system-events time {
+  flex: none;
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
